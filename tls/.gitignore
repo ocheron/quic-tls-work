@@ -1,0 +1,17 @@
+dist
+.stack-work
+.cabal-sandbox
+cabal.sandbox.config
+*.o
+*.hi
+*.tix
+*.mix
+*.pem
+*.csr
+*.crt
+*.key
+stack.yaml.lock
+test-scripts/TestClient
+test-scripts/openssl-server
+test-scripts/openssl-client
+.travis.yml.sav
