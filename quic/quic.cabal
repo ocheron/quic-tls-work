@@ -1,0 +1,117 @@
+name:                quic
+version:             0.0.0
+synopsis:            QUIC
+description:         Library for A UDP-Based Multiplexed and Secure Transport
+license:             BSD3
+license-file:        LICENSE
+author:              Kazu Yamamoto
+maintainer:          kazu@iij.ad.jp
+-- copyright:
+category:            Web
+build-type:          Simple
+-- extra-source-files:  ChangeLog.md
+cabal-version:       >= 1.10
+
+library
+  exposed-modules:     Network.QUIC
+                       Network.QUIC.Client
+                       Network.QUIC.Config
+                       Network.QUIC.Connection
+                       Network.QUIC.Core
+                       Network.QUIC.Handshake
+                       Network.QUIC.IO
+                       Network.QUIC.Packet
+                       Network.QUIC.Parameters
+                       Network.QUIC.Receiver
+                       Network.QUIC.Qlog
+                       Network.QUIC.Sender
+                       Network.QUIC.Server
+                       Network.QUIC.Socket
+                       Network.QUIC.Timeout
+                       Network.QUIC.TLS
+                       Network.QUIC.TLS.Controller
+                       Network.QUIC.TLS.Crypto
+                       Network.QUIC.Types
+                       Network.QUIC.Types.Ack
+                       Network.QUIC.Types.CID
+                       Network.QUIC.Types.Error
+                       Network.QUIC.Types.Frame
+                       Network.QUIC.Types.Integer
+                       Network.QUIC.Types.Packet
+                       Network.QUIC.Types.Queue
+                       Network.QUIC.Types.Resumption
+                       Network.QUIC.Types.UserError
+                       Network.QUIC.Utils
+  other-modules:
+                       Network.QUIC.Connection.Crypto
+                       Network.QUIC.Connection.Migration
+                       Network.QUIC.Connection.Misc
+                       Network.QUIC.Connection.PacketNumber
+                       Network.QUIC.Connection.Queue
+                       Network.QUIC.Connection.Role
+                       Network.QUIC.Connection.State
+                       Network.QUIC.Connection.StreamTable
+                       Network.QUIC.Connection.Transmit
+                       Network.QUIC.Connection.Types
+                       Network.QUIC.Connection.Qlog
+                       Network.QUIC.Exception
+                       Network.QUIC.Imports
+                       Network.QUIC.Packet.Decode
+                       Network.QUIC.Packet.Decrypt
+                       Network.QUIC.Packet.Encode
+                       Network.QUIC.Packet.Frame
+                       Network.QUIC.Packet.Header
+                       Network.QUIC.Packet.Number
+                       Network.QUIC.Packet.Token
+                       Network.QUIC.Packet.Version
+  -- other-extensions:
+  build-depends:       base >= 4.7 && < 5
+                     , base16-bytestring
+                     , bytestring
+                     , containers
+                     , cryptonite
+                     , crypto-token
+                     , data-default-class
+                     , hourglass
+                     , iproute
+                     , memory
+                     , network
+                     , network-byte-order
+                     , psqueues
+                     , stm
+                     , tls
+  -- hs-source-dirs:
+  default-language:    Haskell2010
+  ghc-options:         -Wall -Wcompat
+  default-extensions:  Strict StrictData
+
+test-suite spec
+  Type:                 exitcode-stdio-1.0
+  default-language:     Haskell2010
+  hs-source-dirs:       test
+  ghc-options:          -Wall -threaded
+  main-is:              Spec.hs
+  other-modules:        HandshakeSpec
+                        PacketSpec
+                        TLSSpec
+                        TypesSpec
+  build-depends:        base >= 4 && < 5
+                      , QuickCheck
+                      , async
+                      , base16-bytestring
+                      , bytestring
+                      , hspec
+                      , network
+                      , quic
+                      , tls
+
+test-suite doctests
+  type:                 exitcode-stdio-1.0
+  default-language:     Haskell2010
+  hs-source-dirs:       test
+  main-is:              doctests.hs
+
+  build-depends:        base >= 4.7 && < 5
+                      , doctest >= 0.10.1
+
+  ghc-options: -Wall
