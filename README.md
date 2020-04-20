@@ -62,6 +62,14 @@ Experiments and WIP based on projects:
   restore this we add an `IORef` and count how many `quicRecv` have been done
   since last `quicSend`.
 
+- When testing the mapping between TLS and QUIC encryption levels in direction
+  Rx, it was found the TLS server expected to receive records with the early
+  traffic secret in 0-RTT handshakes.  Upon further inspection, the server logic
+  in QUIC mode was actually skipping the pending action related to message
+  EndOfEarlyData, however `setRxState` was left with `clientEarlySecret` instead
+  of `clientHandshakeSecret`.  After fixing this, QUIC does not need encryption
+  level `CryptEarlySecret` anymore, as one can expect.
+
 - Package `quic` has requirements on `iproute` and `network-byte-order` that are
   not met by old Stackage LTS, so a lower version bound is added.
 
@@ -71,9 +79,6 @@ the new callbacks.  The dialog `ask`/`control` between TLS and QUIC only
 verifies the end of the handshake.
 
 ## To do
-
-- See why TLS `CryptEarlySecret` can be mapped to QUIC `HandshakeLevel` when
-  receiving.
 
 - Understand how TLS handshake and threads terminate, try to remove the
   `ClientContoller` and `ServerController` state machines entirely.
