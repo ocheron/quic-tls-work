@@ -34,6 +34,10 @@ Experiments and WIP based on projects:
   also often need the `Context` argument for other purposes, like logging.  This
   adds repetition.
 
+- For TLS 1.3 the calls `setTxState` and `setRxState` can infer the new
+  encryption level from the secret type.  For versions before TLS 1.3 the
+  encryption level is always `CryptMasterSecret` and set by `setMasterSecret`.
+
 - Handshake fragments are now received through a synchronous `quicRecv` call
   instead of the `ClientContoller` and `ServerController` state machines.  The
   modification is safe because receiving is already reading from a message
@@ -67,9 +71,6 @@ the new callbacks.  The dialog `ask`/`control` between TLS and QUIC only
 verifies the end of the handshake.
 
 ## To do
-
-- The calls `setTxState` and `setRxState` could infer the encryption level from
-  the secret argument instead of requiring separate `CryptLevel` argument.
 
 - See why TLS `CryptEarlySecret` can be mapped to QUIC `HandshakeLevel` when
   receiving.
