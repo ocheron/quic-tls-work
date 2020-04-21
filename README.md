@@ -80,6 +80,10 @@ verifies the end of the handshake.
 
 ## To do
 
+- The removal of `ClientNeedsMore` and `ServerNeedsMore` broke processing of the
+  end of the handshake by the Receiver thread if messages are fragmented.  The
+  Receiver thread is blocked by `ask` and will not process further messages.
+
 - Understand how TLS handshake and threads terminate, try to remove the
   `ClientContoller` and `ServerController` state machines entirely.
 
