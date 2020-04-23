@@ -47,6 +47,14 @@ Experiments and WIP based on projects:
   necessary.  `quicRecv` takes the current TLS encryption level to compare with
   the encryption level found by QUIC.
 
+- Removing `handshakeCheck` required to move the control of TLS handshake
+  previously executed by the Receiver thread to a different thread.  Otherwise
+  the Receiver thread would hang when TLS messages are fragmented.  The Receiver
+  is also the thread dispatching frames to the Crypto queue, and it would wait
+  for itself.  A new thread is added for the duration of the last handshake
+  steps, i.e. receiving client Finished (server) and receiving session tickets
+  (client).
+
 - The `quic` library had special logic to defer server processing of a Stream
   frame until connection is fully established.  This came from the fact that
   encryption level `RTT1Level` was set too early, when the server sends its
@@ -92,10 +100,6 @@ the new callbacks.  The dialog `ask`/`control` between TLS and QUIC only
 verifies the end of the handshake.
 
 ## To do
-
-- The removal of `ClientNeedsMore` and `ServerNeedsMore` broke processing of the
-  end of the handshake by the Receiver thread if messages are fragmented.  The
-  Receiver thread is blocked by `ask` and will not process further messages.
 
 - Understand how TLS handshake and threads terminate, try to remove the
   `ClientContoller` and `ServerController` state machines entirely.
