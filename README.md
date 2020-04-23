@@ -47,7 +47,20 @@ Experiments and WIP based on projects:
   necessary.  `quicRecv` takes the current TLS encryption level to compare with
   the encryption level found by QUIC.
 
-- In the other direction, handshake fragments are sent through `quicSend`.  This
+- The `quic` library had special logic to defer server processing of a Stream
+  frame until connection is fully established.  This came from the fact that
+  encryption level `RTT1Level` was set too early, when the server sends its
+  flight, and before receiving the client flight at `Handshake` level.  But the
+  variable `encryptionLevel` is used only by the Receiver, so it must map to the
+  Rx encryption level.  Deferring the change to `RTT1Level` removes the need to
+  handle Stream frames specially in the server side.  The global logic comparing
+  incoming frames to the current level is enough.  One benefit now is that the
+  logic can also apply to frames other than Stream.  For example a connection
+  closure at `RTT1Level` will not be processed before the `Handshake` flight is
+  processed.  This fully complies with the explanations in [RFC draft section
+  5.7](https://tools.ietf.org/html/draft-ietf-quic-tls-27#section-5.7).
+
+- In the Tx direction, handshake fragments are sent through `quicSend`.  This
   call takes a list of `ByteString` fragments annotated with encryption level.
   QUIC can wrap multiple frames together or not based on its own limits and
   fragmentation requirements.  Sending pushes to a queue, so moving everything
@@ -73,74 +86,16 @@ Experiments and WIP based on projects:
 - Package `quic` has requirements on `iproute` and `network-byte-order` that are
   not met by old Stackage LTS, so a lower version bound is added.
 
-## Result
-
 At this point the `ClientContoller` and `ServerController` state machines are
 still executed but the all the actions that previously existed are done through
 the new callbacks.  The dialog `ask`/`control` between TLS and QUIC only
 verifies the end of the handshake.
 
-### Blocking point
-
-The removal of `ClientNeedsMore` and `ServerNeedsMore` broke processing of the
-end of the handshake by the Receiver thread if messages are fragmented.  The
-Receiver thread is blocked by `ask` and will not process further messages.
-
-For a client there is not much impact when moving the logic out of Receiver
-thread (so the Receiver can continue delivering the CRYPTO frames to TLS).
-
-For a server there is a blocking point:  when receiving the final client flight
-(the part including client Finished), and having this executed by the TLS thread
-only, the CRYPTO frames may be processed out of sequence with respect to other
-incoming frames (like STREAM or CONNECTION_CLOSE).  Typically we notice that the
-client final CONNECTION_CLOSE is processed first whereas CRYPTO and STREAM are
-still unprocessed:
-
-- CRYPTO frames may be in transit in the `cryptoQ` queue
-
-- STREAM frames are delayed with a `waitEstablished` call
-
-### Doubts
-
-In the original implementation, the Receiver thread drives the whole logic and
-processes frames in the order received, so out-of-sequence processing has low
-probability.  And in the event a STREAM frame is received before handshake
-completion, the STREAM frame is delayed to a forked thread testing
-`waitEstablished`:
-
-    processFrame conn RTT1Level (Stream sid off dat fin)
-      | isClient conn = putInputStream conn sid off dat fin
-      | otherwise     = do
-            established <- isConnectionEstablished conn
-            if established then
-                putInputStream conn sid off dat fin
-              else void . forkIO $ do
-                -- Client Finish and Stream are somtime out-ordered.
-                -- This causes a race condition between transport and app.
-                mx <- timeout 100000 $ waitEstablished conn
-                case mx of
-                  Nothing -> return ()
-                  Just _  -> putInputStream conn sid off dat fin
-
-(from here: [permanent link](https://github.com/kazu-yamamoto/quic/blob/ccbc8b9ab50c0d02b8c15963582f3cd99444c961/Network/QUIC/Receiver.hs#L176))
-
-We can note that the mechanism exists for STREAM but not CONNECTION_CLOSE.  So
-it is still possible to process client messages not in the correct order if the
-client sends a single frame and immediately closes the connection.
-
-In contrast, the [RFC draft](https://tools.ietf.org/html/draft-ietf-quic-tls-27#section-4.1.3)
-requires something which looks like a more global solution to this problem:
-
-    If the packet is from a new encryption level, it is saved for
-    later processing by TLS.  Once TLS moves to receiving from this
-    encryption level, saved data can be provided.  When providing data
-    from any new encryption level to TLS, if there is data from a
-    previous encryption level that TLS has not consumed, this MUST be
-    treated as a connection error of type PROTOCOL_VIOLATION.
-
-Is this fully implemented?
-
 ## To do
+
+- The removal of `ClientNeedsMore` and `ServerNeedsMore` broke processing of the
+  end of the handshake by the Receiver thread if messages are fragmented.  The
+  Receiver thread is blocked by `ask` and will not process further messages.
 
 - Understand how TLS handshake and threads terminate, try to remove the
   `ClientContoller` and `ServerController` state machines entirely.
@@ -152,8 +107,6 @@ Is this fully implemented?
   `tls` tries to send its alert but the QUIC record layer rejects with an
   exception.  Ideally error handling should not generate its own set of errors,
   as it tends to mask the original problem.
-
-- Understand why QUIC has a single encryption level, when TLS has Tx / Rx.
 
 - See if it is possible to avoid repeting the TLS cipher in the `SecretInfo`
   data types.  Similarly, handshake mode and negotiated protocol could be
