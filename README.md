@@ -92,7 +92,13 @@ Experiments and WIP based on projects:
   level `CryptEarlySecret` anymore, as one can expect.
 
 - When TLS failures are reported by the API we use an ADT instead of throwing
-  the `TLSError` directly.
+  the `TLSError` as exception.  Handshake failures may originate in the QUIC
+  record layer (in `quicRecv`) or in TLS itself.  The `TLSError` values are
+  reported back to QUIC.  One key element here is to unwrap the `TLSException`
+  to get the inner `TLSError`.  QUIC responsability is to notify the peer
+  through network, and also report the local error condition to application
+  code.  The peer still running handshake will notice an unexpected alert
+  message in `quicRecv` and fail through the exact same steps.
 
 - Eq instances on secret newtypes are removed because not time constant and not
   much useful for real applications.  The instances were used only for testing
@@ -108,27 +114,24 @@ verifies the main steps of the handshake, ensuring some synchronization of
 state, and reporting possible failures:
 
 - QUIC executes the first handshake steps in its main thread, until the Finished
-  message is sent.
+  message is sent.  When a TLS error occurs, it is raised in the thread.
 
-- QUIC executes the last steps in a secondary thread.  This thread just logs
-  TLS errors.
+- QUIC executes the last steps in a secondary thread.  When a TLS error occurs,
+  it is logged by this thread but also generated as `InpError` message for the
+  next `recvStream`.
 
 ## To do
 
-- Understand error handling and make sure errors at any layer are reported
-  appropriately.
+- Currently QUIC manages version negotation failures through `InpVersion` in the
+  Crypto queue.  This is received by `quicRecv` in the TLS thread, so `tls`
+  transforms it to `Error_Misc` and we loose the typing.  Maybe this part should
+  not go through the Crypto queue, because it's not TLS related.  Alternatively,
+  we could add a new constructor `Error_Some SomeException` to hold a
+  `QUICError` (or any other type the record layer wishes).
 
-- Understand how TLS alerts are managed.  Currently when a TLS error occurs,
-  `tls` tries to send its alert but the QUIC record layer rejects with an
-  exception.  Ideally error handling should not generate its own set of errors,
-  as it tends to mask the original problem.
-
-- See if it is possible to avoid repeting the TLS cipher in the `SecretInfo`
+- See if it is possible to avoid repeating the TLS cipher in the `SecretInfo`
   data types.  Similarly, handshake mode and negotiated protocol could be
   available from the TLS context through API.
-
-- Verify if `InpTransportError` with `NoError` always signals end of stream at
-  `RTT1Level` like currently assumed.
 
 - Verify if the new handshake ACK logic gives expected result.  Unclear if the
   frame should be sent before or after new receive.
