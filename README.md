@@ -91,6 +91,9 @@ Experiments and WIP based on projects:
   of `clientHandshakeSecret`.  After fixing this, QUIC does not need encryption
   level `CryptEarlySecret` anymore, as one can expect.
 
+- When TLS failures are reported by the API we use an ADT instead of throwing
+  the `TLSError` directly.
+
 - Eq instances on secret newtypes are removed because not time constant and not
   much useful for real applications.  The instances were used only for testing
   purpose and can be defined locally in the test suite.
@@ -101,16 +104,20 @@ Experiments and WIP based on projects:
 At this point the `ClientContoller` and `ServerController` state machines are
 still executed but the all the actions that previously existed are done through
 the new callbacks.  The dialog `ask`/`control` between TLS and QUIC only
-verifies the end of the handshake.
+verifies the main steps of the handshake, ensuring some synchronization of
+state, and reporting possible failures:
+
+- QUIC executes the first handshake steps in its main thread, until the Finished
+  message is sent.
+
+- QUIC executes the last steps in a secondary thread.  This thread just logs
+  TLS errors.
 
 ## To do
 
-- Understand how TLS handshake and threads terminate, try to remove the
-  `ClientContoller` and `ServerController` state machines entirely.
-
 - Understand error handling and make sure errors at any layer are reported
   appropriately.
-  
+
 - Understand how TLS alerts are managed.  Currently when a TLS error occurs,
   `tls` tries to send its alert but the QUIC record layer rejects with an
   exception.  Ideally error handling should not generate its own set of errors,
