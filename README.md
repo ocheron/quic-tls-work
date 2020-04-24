@@ -91,6 +91,10 @@ Experiments and WIP based on projects:
   of `clientHandshakeSecret`.  After fixing this, QUIC does not need encryption
   level `CryptEarlySecret` anymore, as one can expect.
 
+- Eq instances on secret newtypes are removed because not time constant and not
+  much useful for real applications.  The instances were used only for testing
+  purpose and can be defined locally in the test suite.
+
 - Package `quic` has requirements on `iproute` and `network-byte-order` that are
   not met by old Stackage LTS, so a lower version bound is added.
 
@@ -124,8 +128,6 @@ verifies the end of the handshake.
 
 - Verify if `quic` IORefs modified by the TLS to QUIC callbacks need atomic
   modify or not.
-
-- Avoid Eq instances on secret info that take variable time.
 
 - More generic interface to insert/extract some content in TLS extensions.
   Could be applicable to TLS < 1.3 as well.  And to all message types.
