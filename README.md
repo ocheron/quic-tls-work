@@ -107,18 +107,43 @@ Experiments and WIP based on projects:
 - Package `quic` has requirements on `iproute` and `network-byte-order` that are
   not met by old Stackage LTS, so a lower version bound is added.
 
-At this point the `ClientContoller` and `ServerController` state machines are
-still executed but the all the actions that previously existed are done through
-the new callbacks.  The dialog `ask`/`control` between TLS and QUIC only
-verifies the main steps of the handshake, ensuring some synchronization of
-state, and reporting possible failures:
+## Resulting design
 
-- QUIC executes the first handshake steps in its main thread, until the Finished
-  message is sent.  When a TLS error occurs, it is raised in the thread.
+The `ClientContoller` and `ServerController` state machines are still executed
+but the all the actions and data transfers that previously existed are done
+through the new callbacks.  The dialog `sync`/`control` between TLS and QUIC
+only verifies the main steps of the handshake, ensuring synchronization between
+threads, and reporting possible failures.
 
-- QUIC executes the last steps in a secondary thread.  When a TLS error occurs,
+The main steps of the handshake are:
+
+- FinishedSent: message "Finished" has been sent, endpoint is ready to send
+  application traffic
+
+- HandshakeComplete: peer message "Finished" has been received and verified,
+  endpoint is ready to receive application traffic
+
+- HandshakeConfirmed: TLS handshake is no more needed, session tickets have all
+  been transferred
+
+Out of those three defined steps, only two are really used.  For a client, steps
+FinishedSent and HandshakeComplete are the same.  For a server, steps
+HandshakeComplete and HandshakeConfirmed are the same.
+
+QUIC uses the sychronization point `sync`/`control` to implement thread
+separation and handle possible handshake failures:
+
+- QUIC executes the first part of handshake in its main thread, until the
+  "Finished" message is sent.  When a TLS error occurs, it is raised in the
+  thread.
+
+- QUIC executes the second part in a secondary thread.  When a TLS error occurs,
   it is logged by this thread but also generated as `InpError` message for the
-  next `recvStream`.
+  next `recvStream`.  For a server, the thread receives and verifies the client
+  "Finished" message, then terminates.  For a client, the thread is an infinite
+  loop to receive session tickets one by one and report a failure if any.  This
+  thread is killed when QUIC has confirmation from the remote end (message
+  HandshakeDone).
 
 ## To do
 
