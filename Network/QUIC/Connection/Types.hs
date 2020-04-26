@@ -13,6 +13,7 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
+import Foreign.Marshal.Alloc (mallocBytes)
 import Network.Socket (Socket)
 import Network.TLS.QUIC
 import System.Mem.Weak
@@ -173,10 +174,19 @@ data Connection = Connection {
   , streamTable       :: IORef StreamTable
   -- TLS
   , encryptionLevel   :: TVar EncryptionLevel -- to synchronize
+  , pendingHandshake  :: TVar [CryptPacket]
+  , pendingRTT1       :: TVar [CryptPacket]
   , iniSecrets        :: IORef (TrafficSecrets InitialSecret)
   , elySecInfo        :: IORef EarlySecretInfo
   , hndSecInfo        :: IORef HandshakeSecretInfo
   , appSecInfo        :: IORef ApplicationSecretInfo
+  -- WriteBuffer
+  , headerBuffer      :: Buffer
+  , headerBufferSize  :: BufferSize
+  , payloadBuffer     :: Buffer
+  , payloadBufferSize :: BufferSize
+  -- Misc
+  , nextVersion       :: IORef (Maybe Version)
   }
 
 newConnection :: Role -> Version -> CID -> CID
@@ -213,10 +223,17 @@ newConnection rl ver myCID peerCID debugLog qLog close sref isecs =
         <*> newIORef emptyStreamTable
         -- TLS
         <*> newTVarIO InitialLevel
+        <*> newTVarIO []
+        <*> newTVarIO []
         <*> newIORef isecs
         <*> newIORef (EarlySecretInfo defaultCipher (ClientTrafficSecret ""))
         <*> newIORef (HandshakeSecretInfo defaultCipher defaultTrafficSecrets)
         <*> newIORef (ApplicationSecretInfo FullHandshake Nothing defaultTrafficSecrets)
+        <*> mallocBytes 256
+        <*> return 256
+        <*> mallocBytes 1280
+        <*> return 1280
+        <*> newIORef Nothing
   where
     initialRoleInfo
       | rl == Client = defaultClientRoleInfo
