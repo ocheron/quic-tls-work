@@ -4,9 +4,12 @@ module Network.QUIC.Connection.Misc (
     setVersion
   , getVersion
   , setThreadIds
+  , addThreadIds
   , clearThreads
   , getSockInfo
   , setSockInfo
+  , getNextVersion
+  , setNextVersion
   ) where
 
 import Control.Concurrent
@@ -32,6 +35,11 @@ setThreadIds Connection{..} tids = do
     wtids <- mapM mkWeakThreadId tids
     writeIORef threadIds wtids
 
+addThreadIds :: Connection -> [ThreadId] -> IO ()
+addThreadIds Connection{..} tids = do
+    wtids <- mapM mkWeakThreadId tids
+    modifyIORef threadIds (wtids ++)
+
 clearThreads :: Connection -> IO ()
 clearThreads Connection{..} = do
     wtids <- readIORef threadIds
@@ -51,3 +59,11 @@ getSockInfo Connection{..} = readIORef sockInfo
 
 setSockInfo :: Connection -> (Socket, RecvQ) -> IO ()
 setSockInfo Connection{..} si = writeIORef sockInfo si
+
+----------------------------------------------------------------
+
+getNextVersion :: Connection -> IO (Maybe Version)
+getNextVersion Connection{..} = readIORef nextVersion
+
+setNextVersion :: Connection -> Version -> IO ()
+setNextVersion Connection{..} ver = writeIORef nextVersion $ Just ver

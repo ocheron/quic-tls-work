@@ -19,6 +19,7 @@ module Network.QUIC.Connection (
   , nullPeerPacketNumbers
   , fromPeerPacketNumbers
   -- * Crypto
+  , getEncryptionLevel
   , setEncryptionLevel
   , checkEncryptionLevel
   , getPeerParameters
@@ -58,9 +59,12 @@ module Network.QUIC.Connection (
   , setVersion
   , getVersion
   , setThreadIds
+  , addThreadIds
   , clearThreads
   , getSockInfo
   , setSockInfo
+  , getNextVersion
+  , setNextVersion
   -- * Transmit
   , keepPlainPacket
   , releasePlainPacket
@@ -119,6 +123,11 @@ module Network.QUIC.Connection (
   , qlogDropped
   , qlogRecvInitial
   , qlogSentRetry
+  -- Types
+  , headerBuffer
+  , headerBufferSize
+  , payloadBuffer
+  , payloadBufferSize
   ) where
 
 import Network.QUIC.Connection.Crypto

@@ -9,7 +9,7 @@ import Network.QUIC.Types.Frame
 import Network.QUIC.Types.Packet
 import Network.QUIC.Types.UserError
 
-data Input = InpStream StreamId ByteString Fin
+data Input = InpStream StreamId StreamData Fin
            | InpHandshake EncryptionLevel ByteString
            | InpTransportError TransportError FrameType ReasonPhrase
            | InpApplicationError ApplicationError ReasonPhrase
@@ -17,14 +17,11 @@ data Input = InpStream StreamId ByteString Fin
            | InpError QUICError
            deriving Show
 
-data Output = OutStream StreamId ByteString Fin
+data Output = OutStream StreamId [StreamData] Fin
             | OutShutdown StreamId
             | OutControl EncryptionLevel [Frame]
-            | OutHndClientHello  ByteString (Maybe (StreamId,ByteString))
-            | OutHndServerHello  ByteString ByteString
-            | OutHndServerHelloR ByteString
-            | OutHndClientFinished ByteString
-            | OutHndServerNST ByteString
+            | OutEarlyData (Maybe (StreamId,ByteString))
+            | OutHandshake [(EncryptionLevel,ByteString)]
             | OutPlainPacket PlainPacket [PacketNumber]
             deriving Show
 
@@ -38,3 +35,6 @@ readRecvQ (RecvQ q) = atomically $ readTQueue q
 
 writeRecvQ :: RecvQ -> CryptPacket -> IO ()
 writeRecvQ (RecvQ q) x = atomically $ writeTQueue q x
+
+prependRecvQ :: RecvQ -> CryptPacket -> STM ()
+prependRecvQ (RecvQ q) = unGetTQueue q

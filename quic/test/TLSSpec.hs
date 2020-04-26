@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- https://quicwg.org/base-drafts/draft-ietf-quic-tls.html#initial-secrets
 
@@ -10,6 +11,14 @@ import Test.Hspec
 import Network.QUIC.TLS
 import Network.QUIC.Types
 import Network.QUIC.Utils
+
+----------------------------------------------------------------
+
+instance Eq (ClientTrafficSecret a) where
+    ClientTrafficSecret x == ClientTrafficSecret y = x == y
+
+instance Eq (ServerTrafficSecret a) where
+    ServerTrafficSecret x == ServerTrafficSecret y = x == y
 
 ----------------------------------------------------------------
 
@@ -76,7 +85,7 @@ spec = do
             let plaintext = clientCRYPTOframePadded
             let nonce = makeNonce civ $ dec16 "00000002"
             let add = AddDat clientPacketHeader
-            let ciphertext = encryptPayload defaultCipher ckey nonce plaintext add
+            let ciphertext = B.concat $ encryptPayload defaultCipher ckey nonce plaintext add
             let Just plaintext' = decryptPayload defaultCipher ckey nonce ciphertext add
             plaintext' `shouldBe` plaintext
 
