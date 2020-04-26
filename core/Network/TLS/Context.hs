@@ -168,6 +168,7 @@ contextNew backend params = liftIO $ do
             , ctxShared       = shared
             , ctxSupported    = supported
             , ctxState        = stvar
+            , ctxFragmentSize = Just 16384
             , ctxTxState      = tx
             , ctxRxState      = rx
             , ctxHandshake    = hs
@@ -199,7 +200,6 @@ contextNew backend params = liftIO $ do
             , recordSendBytes = sendBytes ctx
             , recordRecv      = recvRecord ctx
             , recordRecv13    = recvRecord13 ctx
-            , recordNeedFlush = False
             }
 
     return ctx
