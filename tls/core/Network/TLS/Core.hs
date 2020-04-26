@@ -50,7 +50,7 @@ import Network.TLS.Handshake.State
 import Network.TLS.Handshake.State13
 import Network.TLS.PostHandshake
 import Network.TLS.KeySchedule
-import Network.TLS.Types (Role(..), HostName)
+import Network.TLS.Types (Role(..), HostName, AnyTrafficSecret(..), ApplicationSecret)
 import Network.TLS.Util (catchException, mapChunks_)
 import Network.TLS.Extension
 import qualified Network.TLS.State as S
@@ -102,7 +102,8 @@ sendData ctx dataToSend = liftIO $ do
         -- All chunks are protected with the same write lock because we don't
         -- want to interleave writes from other threads in the middle of our
         -- possibly large write.
-        mapM_ (mapChunks_ 16384 sendP) (L.toChunks dataToSend)
+        let len = ctxFragmentSize ctx
+        mapM_ (mapChunks_ len sendP) (L.toChunks dataToSend)
 
 -- | Get data out of Data packet, and automatically renegotiate if a Handshake
 -- ClientHello is received.  An empty result means EOF.
@@ -195,7 +196,7 @@ recvData13 ctx = do
             -- session manager).
             withWriteLock ctx $ do
                 Just resumptionMasterSecret <- usingHState ctx getTLS13ResumptionSecret
-                (_, usedCipher, _) <- getTxState ctx
+                (_, usedCipher, _, _) <- getTxState ctx
                 let choice = makeCipherChoice TLS13 usedCipher
                     psk = derivePSK choice resumptionMasterSecret nonce
                     maxSize = case extensionLookup extensionID_EarlyData exts >>= extensionDecode MsgTNewSessionTicket of
@@ -295,13 +296,15 @@ recvData' :: MonadIO m => Context -> m L.ByteString
 recvData' ctx = L.fromChunks . (:[]) <$> recvData ctx
 
 keyUpdate :: Context
-          -> (Context -> IO (Hash,Cipher,C8.ByteString))
-          -> (Context -> Hash -> Cipher -> C8.ByteString -> IO ())
+          -> (Context -> IO (Hash,Cipher,CryptLevel,C8.ByteString))
+          -> (Context -> Hash -> Cipher -> AnyTrafficSecret ApplicationSecret -> IO ())
           -> IO ()
 keyUpdate ctx getState setState = do
-    (usedHash, usedCipher, applicationSecretN) <- getState ctx
+    (usedHash, usedCipher, level, applicationSecretN) <- getState ctx
+    unless (level == CryptApplicationSecret) $
+        throwCore $ Error_Protocol ("tried key update without application traffic secret", True, InternalError)
     let applicationSecretN1 = hkdfExpandLabel usedHash applicationSecretN "traffic upd" "" $ hashDigestSize usedHash
-    setState ctx usedHash usedCipher applicationSecretN1
+    setState ctx usedHash usedCipher (AnyTrafficSecret applicationSecretN1)
 
 -- | How to update keys in TLS 1.3
 data KeyUpdateRequest = OneWay -- ^ Unidirectional key update

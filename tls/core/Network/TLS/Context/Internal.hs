@@ -1,4 +1,6 @@
+{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 -- |
 -- Module      : Network.TLS.Context.Internal
 -- License     : BSD-style
@@ -35,6 +37,7 @@ module Network.TLS.Context.Internal
     , contextClose
     , contextSend
     , contextRecv
+    , updateRecordLayer
     , updateMeasure
     , withMeasure
     , withReadLock
@@ -104,7 +107,7 @@ data Information = Information
     } deriving (Show,Eq)
 
 -- | A TLS Context keep tls specific state, parameters and backend information.
-data Context = Context
+data Context = forall bytes . Monoid bytes => Context
     { ctxConnection       :: Backend   -- ^ return the backend object associated with this context
     , ctxSupported        :: Supported
     , ctxShared           :: Shared
@@ -116,6 +119,7 @@ data Context = Context
     , ctxSSLv2ClientHello :: IORef Bool    -- ^ enable the reception of compatibility SSLv2 client hello.
                                            -- the flag will be set to false regardless of its initial value
                                            -- after the first packet received.
+    , ctxFragmentSize     :: Maybe Int        -- ^ maximum size of plaintext fragments
     , ctxTxState          :: MVar RecordState -- ^ current tx state
     , ctxRxState          :: MVar RecordState -- ^ current rx state
     , ctxHandshake        :: MVar (Maybe HandshakeState) -- ^ optional handshake state
@@ -131,9 +135,13 @@ data Context = Context
     , ctxPendingActions   :: IORef [PendingAction]
     , ctxCertRequests     :: IORef [Handshake13]  -- ^ pending PHA requests
     , ctxKeyLogger        :: String -> IO ()
-    , ctxRecordLayer      :: RecordLayer
+    , ctxRecordLayer      :: RecordLayer bytes
     , ctxHandshakeSync    :: HandshakeSync
     }
+
+updateRecordLayer :: Monoid bytes => RecordLayer bytes -> Context -> Context
+updateRecordLayer recordLayer Context{..} =
+    Context { ctxRecordLayer = recordLayer, .. }
 
 data Established = NotEstablished
                  | EarlyDataAllowed Int    -- remaining 0-RTT bytes allowed

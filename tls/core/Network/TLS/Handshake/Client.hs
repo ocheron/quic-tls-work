@@ -103,7 +103,7 @@ handshakeClient' cparams ctx groups mparams = do
                     | otherwise -> throwCore $ Error_Protocol ("server-selected group is not supported", True, IllegalParameter)
                   Just _  -> error "handshakeClient': invalid KeyShare value"
                   Nothing -> throwCore $ Error_Protocol ("key exchange not implemented in HRR, expected key_share extension", True, HandshakeFailure)
-          else do
+          else
             handshakeClient13 cparams ctx groupToSend
       else do
         when rtt0 $
@@ -313,14 +313,15 @@ handshakeClient' cparams ctx groups mparams = do
                 -- Client hello is stored in hstHandshakeDigest
                 -- But HandshakeDigestContext is not created yet.
                 earlyKey <- calculateEarlySecret ctx choice (Right earlySecret) False
-                let ces@(ClientTrafficSecret clientEarlySecret) = pairClient earlyKey
+                let clientEarlySecret = pairClient earlyKey
                 when (earlyData /= quicEarlyData) $ do
                     runPacketFlight ctx $ sendChangeCipherSpec13 ctx
                     setTxState ctx usedHash usedCipher clientEarlySecret
-                    mapChunks_ 16384 (sendPacket13 ctx . AppData13) earlyData
+                    let len = ctxFragmentSize ctx
+                    mapChunks_ len (sendPacket13 ctx . AppData13) earlyData
                 -- We set RTT0Sent for QUIC even if earlyData == "".
                 usingHState ctx $ setTLS13RTT0Status RTT0Sent
-                return $ EarlySecretInfo usedCipher ces
+                return $ EarlySecretInfo usedCipher clientEarlySecret
 
         recvServerHello clientSession sentExts = runRecvState ctx recvState
           where recvState = RecvStateNext $ \p ->
@@ -860,9 +861,9 @@ handshakeClient13' :: ClientParams -> Context -> Maybe Group -> CipherChoice -> 
 handshakeClient13' cparams ctx groupSent choice = do
     (_, hkey, resuming) <- switchToHandshakeSecret
     let handshakeSecret = triBase hkey
-        chs@(ClientTrafficSecret clientHandshakeSecret) = triClient hkey
-        shs@(ServerTrafficSecret serverHandshakeSecret) = triServer hkey
-        handSecInfo = HandshakeSecretInfo usedCipher (chs,shs)
+        clientHandshakeSecret = triClient hkey
+        serverHandshakeSecret = triServer hkey
+        handSecInfo = HandshakeSecretInfo usedCipher (clientHandshakeSecret,serverHandshakeSecret)
     contextSync ctx $ RecvServerHelloI handSecInfo
     (rtt0accepted,eexts) <- runRecvHandshake13 $ do
         accext <- recvHandshake13 ctx expectEncryptedExtensions
@@ -895,15 +896,15 @@ handshakeClient13' cparams ctx groupSent choice = do
         ecdhe <- calcSharedKey
         (earlySecret, resuming) <- makeEarlySecret
         handKey <- calculateHandshakeSecret ctx choice earlySecret ecdhe
-        let ServerTrafficSecret serverHandshakeSecret = triServer handKey
+        let serverHandshakeSecret = triServer handKey
         setRxState ctx usedHash usedCipher serverHandshakeSecret
         return (usedCipher, handKey, resuming)
 
     switchToApplicationSecret handshakeSecret hChSf = do
         ensureRecvComplete ctx
         appKey <- calculateApplicationSecret ctx choice handshakeSecret hChSf
-        let ServerTrafficSecret serverApplicationSecret0 = triServer appKey
-        let ClientTrafficSecret clientApplicationSecret0 = triClient appKey
+        let serverApplicationSecret0 = triServer appKey
+        let clientApplicationSecret0 = triClient appKey
         setTxState ctx usedHash usedCipher clientApplicationSecret0
         setRxState ctx usedHash usedCipher serverApplicationSecret0
         return appKey
@@ -979,7 +980,7 @@ handshakeClient13' cparams ctx groupSent choice = do
         unless ok $ decryptError "cannot verify CertificateVerify"
     expectCertVerify _ _ p = unexpected (show p) (Just "certificate verify")
 
-    expectFinished baseKey hashValue (Finished13 verifyData) =
+    expectFinished (ServerTrafficSecret baseKey) hashValue (Finished13 verifyData) =
         checkFinished usedHash baseKey hashValue verifyData
     expectFinished _ _ p = unexpected (show p) (Just "server finished")
 
@@ -1036,8 +1037,8 @@ processCertRequest13 ctx token exts = do
     uncertsig (SignatureAlgorithmsCert a) = Just a
     -}
 
-sendClientFlight13 :: ClientParams -> Context -> Hash -> ByteString -> IO ()
-sendClientFlight13 cparams ctx usedHash baseKey = do
+sendClientFlight13 :: ClientParams -> Context -> Hash -> ClientTrafficSecret a -> IO ()
+sendClientFlight13 cparams ctx usedHash (ClientTrafficSecret baseKey) = do
     chain <- clientChain cparams ctx
     runPacketFlight ctx $ do
         case chain of
@@ -1083,8 +1084,10 @@ postHandshakeAuthClientWith cparams ctx h@(CertRequest13 certReqCtx exts) =
     bracket (saveHState ctx) (restoreHState ctx) $ \_ -> do
         processHandshake13 ctx h
         processCertRequest13 ctx certReqCtx exts
-        (usedHash, _, applicationSecretN) <- getTxState ctx
-        sendClientFlight13 cparams ctx usedHash applicationSecretN
+        (usedHash, _, level, applicationSecretN) <- getTxState ctx
+        unless (level == CryptApplicationSecret) $
+            throwCore $ Error_Protocol ("unexpected post-handshake authentication request", True, UnexpectedMessage)
+        sendClientFlight13 cparams ctx usedHash (ClientTrafficSecret applicationSecretN)
 
 postHandshakeAuthClientWith _ _ _ =
     throwCore $ Error_Protocol ("unexpected handshake message received in postHandshakeAuthClientWith", True, UnexpectedMessage)
