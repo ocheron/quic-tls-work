@@ -16,9 +16,6 @@ Experiments and WIP based on projects:
   data types.  Similarly, handshake mode and negotiated protocol could be
   available from the TLS context through API.
 
-- Verify if the new handshake ACK logic gives expected result.  Unclear if the
-  frame should be sent before or after new receive.
-
 - More generic interface to insert/extract some content in TLS extensions.
   Could be applicable to TLS < 1.3 as well.  And to all message types.
 
