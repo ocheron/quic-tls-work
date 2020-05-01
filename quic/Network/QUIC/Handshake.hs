@@ -128,11 +128,7 @@ handshakeClient conf conn = do
     state <- control EnterClient
     case state of
         ClientHandshakeComplete -> return ()
-        ClientHandshakeFailed e -> do
-            mnver <- getNextVersion conn
-            case mnver of
-              Nothing   -> notifyPeer conn e >>= E.throwIO
-              Just nver -> E.throwIO $ NextVersion nver
+        ClientHandshakeFailed e -> notifyPeer conn e >>= E.throwIO
         _ -> E.throwIO $ HandshakeFailed $ "handshakeClient: unexpected " ++ show state
 
   where
