@@ -50,14 +50,15 @@ import Network.TLS.X509
 import Network.TLS.Imports
 
 import Control.Monad.State.Strict
-import Control.Exception (IOException, handle, fromException, throwIO)
+import Control.Exception ( AsyncException, ErrorCall, IOException
+                         , handle, fromException, throwIO )
 
 handshakeFailed :: TLSError -> IO ()
 handshakeFailed err = throwIO $ HandshakeFailed err
 
 handleException :: Context -> IO () -> IO ()
 handleException ctx f = catchException f $ \exception -> do
-    let tlserror = fromMaybe (Error_Misc $ show exception) $ fromException exception
+    let tlserror = toTLSError exception
     setEstablished ctx NotEstablished
     handle ignoreIOErr $ do
         tls13 <- tls13orLater ctx
@@ -69,6 +70,17 @@ handleException ctx f = catchException f $ \exception -> do
   where
     ignoreIOErr :: IOException -> IO ()
     ignoreIOErr _ = return ()
+
+    -- TLSError raised as exception is already a TLSError.  By default unhandled
+    -- exceptions are now wrapped with Error_Exception.  To limit behavior
+    -- change, some common exception types like IOException still use
+    -- Error_Misc.
+    toTLSError exception
+        | Just e <- fromException exception = e
+        | Just e <- fromException exception = Error_Misc $ show (e :: AsyncException)
+        | Just e <- fromException exception = Error_Misc $ show (e :: ErrorCall)
+        | Just e <- fromException exception = Error_Misc $ show (e :: IOException)
+        | otherwise = Error_Exception "unhandled exception" exception
 
 errorToAlert :: TLSError -> [(AlertLevel, AlertDescription)]
 errorToAlert (Error_Protocol (_, _, ad))   = [(AlertLevel_Fatal, ad)]

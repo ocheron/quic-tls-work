@@ -634,8 +634,7 @@ processServerExtension (ExtensionRaw extID content)
 processServerExtension _ = return ()
 
 throwMiscErrorOnException :: String -> SomeException -> IO a
-throwMiscErrorOnException msg e =
-    throwCore $ Error_Misc $ msg ++ ": " ++ show e
+throwMiscErrorOnException msg e = throwCore $ Error_Exception msg e
 
 -- | onServerHello process the ServerHello message on the client.
 --

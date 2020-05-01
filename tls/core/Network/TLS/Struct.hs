@@ -62,7 +62,7 @@ module Network.TLS.Struct
 
 import Data.X509 (CertificateChain, DistinguishedName)
 import Data.Typeable
-import Control.Exception (Exception(..))
+import Control.Exception (Exception(..), SomeException)
 import Network.TLS.Types
 import Network.TLS.Crypto
 import Network.TLS.Util.Serialization
@@ -164,6 +164,7 @@ data ProtocolType =
 -- | TLSError that might be returned through the TLS stack
 data TLSError =
       Error_Misc String        -- ^ mainly for instance of Error
+    | Error_Exception String SomeException -- ^ to relay other exceptions
     | Error_Protocol (String, Bool, AlertDescription)
     | Error_Certificate String
     | Error_HandshakePolicy String -- ^ handshake policy failed.
@@ -171,7 +172,24 @@ data TLSError =
     | Error_Packet String
     | Error_Packet_unexpected String String
     | Error_Packet_Parsing String
-    deriving (Eq, Show, Typeable)
+    deriving (Show, Typeable)
+
+-- Ideally this instance should not exist, but is sometimes used in dependent
+-- packages instead of pattern matching.  In all generality SomeException
+-- cannot be tested for equality, so we always consider them different in
+-- Error_Exception.  The other constructors compare content like a derived Eq
+-- instance would do.
+instance Eq TLSError where
+    Error_Misc a == Error_Misc b = a == b
+    Error_Protocol a == Error_Protocol b = a == b
+    Error_Certificate a == Error_Certificate b = a == b
+    Error_HandshakePolicy a == Error_HandshakePolicy b = a == b
+    Error_EOF == Error_EOF = True
+    Error_Packet a == Error_Packet b = a == b
+    Error_Packet_unexpected a aa == Error_Packet_unexpected b bb =
+        a == b && aa == bb
+    Error_Packet_Parsing a == Error_Packet_Parsing b = a == b
+    _ == _ = False
 
 #if MIN_VERSION_mtl(2,2,1)
 #else
