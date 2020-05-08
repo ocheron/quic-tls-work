@@ -48,20 +48,21 @@ recvCryptoData conn = do
     dat <- takeCrypto conn
     case dat of
       InpHandshake lvl bs        -> return $ Right (lvl, bs)
-      -- When possible we return normal TLS errors to TLS callbacks.
+      InpVersion (Just ver)      -> throwE $ NextVersion ver
+      InpVersion Nothing         -> throwE   VersionNegotiationFailed
+      InpError e                 -> throwE e
       InpTransportError err _ bs
           | err == NoError       -> return $ Left TLS.Error_EOF
           | otherwise            ->
               let msg | bs == ""  = "received transport error during TLS handshake: " ++ show err
                       | otherwise = "received transport error during TLS handshake: " ++ show err ++ ", reason=" ++ show bs
                in return $ Left $ unexpectedMessage msg
-      -- When QUICError values have no TLS counterpart: we throw them as is.
-      -- TLS will transform into TLS.Error_Misc, this is quite unfortunate.
-      InpVersion (Just ver)      -> E.throwIO $ NextVersion ver
-      InpVersion Nothing         -> E.throwIO   VersionNegotiationFailed
-      InpError e                 -> E.throwIO e
-      InpApplicationError err bs -> E.throwIO $ ApplicationErrorOccurs err bs
-      InpStream{}                -> E.throwIO   MustNotReached
+      InpApplicationError err bs -> throwE $ ApplicationErrorOccurs err bs
+      InpStream{}                -> throwE   MustNotReached
+  where
+    throwE :: E.Exception e => e -> IO (Either TLS.TLSError a)
+    throwE = return . Left . TLS.Error_Exception str . E.toException
+    str = "Exception from QUIC record layer"
 
 recvTLS :: Connection -> IORef HndState -> CryptLevel -> IO (Either TLS.TLSError ByteString)
 recvTLS conn hsr level =
@@ -128,7 +129,7 @@ handshakeClient conf conn = do
     state <- control EnterClient
     case state of
         ClientHandshakeComplete -> return ()
-        ClientHandshakeFailed e -> notifyPeer conn e >>= E.throwIO
+        ClientHandshakeFailed e -> handleHandshakeFailure conn e
         _ -> E.throwIO $ HandshakeFailed $ "handshakeClient: unexpected " ++ show state
 
   where
@@ -150,7 +151,7 @@ handshakeClientAsync conn control = handleLog logAction $ forever $ do
     state <- control RecvSessionTickets
     case state of
         ClientRecvSessionTicket -> return ()
-        ClientHandshakeFailed e -> notifyPeerAsync conn e >>= E.throwIO
+        ClientHandshakeFailed e -> handleHandshakeFailureAsync conn e
         _ -> E.throwIO $ HandshakeFailed $ "unexpected " ++ show state
   where
     logAction msg = connDebugLog conn ("client handshake: " ++ msg)
@@ -171,7 +172,7 @@ handshakeServer conf origCID conn = do
     state <- control EnterServer
     case state of
         ServerFinishedSent -> return ()
-        ServerHandshakeFailed e -> notifyPeer conn e >>= E.throwIO
+        ServerHandshakeFailed e -> handleHandshakeFailure conn e
         _ -> E.throwIO $ HandshakeFailed $ "handshakeServer: unexpected " ++ show state
 
   where
@@ -209,7 +210,7 @@ handshakeServerAsync conn control = handleLog logAction $ do
           let ncid = NewConnectionID cidInfo 0
           let frames = [HandshakeDone,NewToken token,ncid]
           putOutput conn $ OutControl RTT1Level frames
-      ServerHandshakeFailed e -> notifyPeerAsync conn e >>= E.throwIO
+      ServerHandshakeFailed e -> handleHandshakeFailureAsync conn e
       _ -> E.throwIO $ HandshakeFailed $ "unexpected " ++ show state
   where
     logAction msg = connDebugLog conn ("server handshake: " ++ msg)
@@ -223,6 +224,28 @@ setPeerParams conn [ExtensionRaw extid params]
           Just plist -> setPeerParameters conn plist
 setPeerParams _ _ = return ()
 
+handleHandshakeFailure :: Connection -> TLS.TLSError -> IO ()
+handleHandshakeFailure conn e =
+    -- fixme: for QUICError and InternalControl, decide for which we want to
+    -- send ConnectionCloseQUIC to the peer, and for which we want to throw
+    -- without HandshakeFailed wrapper.
+    --
+    -- For now we just handle InternalControl specially, throwing it back to the
+    -- caller, so that NextVersion retry is executed when a client connects.
+    case e of
+        TLS.Error_Exception _ exception
+            | Just a <- E.fromException exception ->
+                E.throwIO (a :: InternalControl)
+        _ -> notifyPeer conn e >>= E.throwIO
+
+handleHandshakeFailureAsync :: Connection -> TLS.TLSError -> IO ()
+handleHandshakeFailureAsync conn err = do
+    -- fixme: same as above, if desired some TLS.Error_Exception values can be
+    -- handled specially
+    exception <- notifyPeer conn err
+    putInput conn $ InpError exception  -- also report in next recvStream
+    E.throwIO exception
+
 notifyPeer :: Connection -> TLS.TLSError -> IO QUICError
 notifyPeer conn err = do
     let ad = errorToAlertDescription err
@@ -230,9 +253,3 @@ notifyPeer conn err = do
     level <- getEncryptionLevel conn
     putOutput conn $ OutControl level frames
     return $ HandshakeFailed $ errorToAlertMessage err
-
-notifyPeerAsync :: Connection -> TLS.TLSError -> IO QUICError
-notifyPeerAsync conn err = do
-    exception <- notifyPeer conn err
-    putInput conn $ InpError exception  -- also report in next recvStream
-    return exception
