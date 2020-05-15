@@ -4,6 +4,7 @@ module Network.QUIC.Types (
   , Receive
   , LogAction
   , Close
+  , Direction(..)
   , module Network.QUIC.Types.Ack
   , module Network.QUIC.Types.CID
   , module Network.QUIC.Types.Error
@@ -12,6 +13,7 @@ module Network.QUIC.Types (
   , module Network.QUIC.Types.Packet
   , module Network.QUIC.Types.Queue
   , module Network.QUIC.Types.Resumption
+  , module Network.QUIC.Types.Stream
   , module Network.QUIC.Types.UserError
   ) where
 
@@ -24,6 +26,7 @@ import Network.QUIC.Types.Integer
 import Network.QUIC.Types.Packet
 import Network.QUIC.Types.Queue
 import Network.QUIC.Types.Resumption
+import Network.QUIC.Types.Stream
 import Network.QUIC.Types.UserError
 
 type SendMany = [ByteString] -> IO ()

@@ -1,11 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
-module Network.QUIC.TLS.Controller (
-    nullClientController
-  , clientController
-  , nullServerController
-  , serverController
+module Network.QUIC.TLS.Handshaker (
+    clientHandshaker
+  , serverHandshaker
   ) where
 
 import Data.Default.Class
@@ -16,9 +14,6 @@ import Network.QUIC.Config
 import Network.QUIC.Parameters hiding (diff)
 import Network.QUIC.Types
 
-nullClientController :: ClientController
-nullClientController _ = return ClientHandshakeDone
-
 sessionManager :: SessionEstablish -> SessionManager
 sessionManager establish = SessionManager {
     sessionEstablish      = establish
@@ -27,9 +22,9 @@ sessionManager establish = SessionManager {
   , sessionInvalidate     = \_ -> return ()
   }
 
-clientController:: QUICCallbacks -> ClientConfig -> Version -> SessionEstablish -> Bool ->IO ClientController
-clientController callbacks ClientConfig{..} ver establish sendEarlyData =
-    newQUICClient cparams callbacks
+clientHandshaker:: QUICCallbacks -> ClientConfig -> Version -> SessionEstablish -> Bool ->IO ()
+clientHandshaker callbacks ClientConfig{..} ver establish use0RTT =
+    tlsQUICClient cparams callbacks
   where
     cparams = (defaultParamsClient ccServerName "") {
         clientShared            = cshared
@@ -37,7 +32,7 @@ clientController callbacks ClientConfig{..} ver establish sendEarlyData =
       , clientSupported         = supported
       , clientDebug             = debug
       , clientWantSessionResume = resumptionSession ccResumption
-      , clientEarlyData         = if sendEarlyData then Just "" else Nothing
+      , clientEarlyData         = if use0RTT then Just "" else Nothing
       }
     eQparams = encodeParametersList $ diffParameters $ confParameters ccConfig
     cshared = def {
@@ -51,24 +46,20 @@ clientController callbacks ClientConfig{..} ver establish sendEarlyData =
     hook = def {
         onSuggestALPN = ccALPN ver
       }
-    supported = def {
-        supportedVersions = [TLS13]
-      , supportedCiphers  = confCiphers ccConfig
+    supported = defaultSupported {
+        supportedCiphers  = confCiphers ccConfig
       , supportedGroups   = confGroups  ccConfig
       }
     debug = def {
         debugKeyLogger = confKeyLog ccConfig
       }
 
-nullServerController :: ServerController
-nullServerController _ = return ServerHandshakeDone
-
-serverController :: QUICCallbacks
+serverHandshaker :: QUICCallbacks
                  -> ServerConfig
                  -> Version
                  -> OrigCID
-                 -> IO ServerController
-serverController callbacks ServerConfig{..} ver origCID = do
+                 -> IO ()
+serverHandshaker callbacks ServerConfig{..} ver origCID = do
     Right cred <- credentialLoadX509 scCert scKey
     let qparams = case origCID of
           OCFirst _    -> confParameters scConfig
@@ -86,7 +77,7 @@ serverController callbacks ServerConfig{..} ver origCID = do
       , serverDebug     = debug
       , serverEarlyDataSize = if scEarlyDataSize > 0 then quicMaxEarlyDataSize else 0
       }
-    newQUICServer sparams callbacks
+    tlsQUICServer sparams callbacks
   where
     hook = def {
         onALPNClientSuggest = case scALPN of

@@ -5,7 +5,7 @@ module Network.QUIC.Config where
 import Data.IP
 import Network.Socket
 import Network.TLS hiding (Version, HostName)
-import Network.TLS.Extra.Cipher
+import Network.TLS.QUIC
 
 import Network.QUIC.Imports
 import Network.QUIC.Parameters
@@ -28,8 +28,9 @@ data Config = Config {
 defaultConfig :: Config
 defaultConfig = Config {
     confVersions       = [Draft27]
-  , confCiphers        = ciphersuite_strong
-  , confGroups         = [X25519,P256,P384,P521]
+                         -- intentionally excluding cipher_TLS13_CHACHA20POLY1305_SHA256 due to cryptonite limitation
+  , confCiphers        = supportedCiphers defaultSupported
+  , confGroups         = supportedGroups defaultSupported
   , confParameters     = defaultParameters
   , confKeyLog         = \_ -> return ()
   , confDebugLog       = \_ _ -> return ()
@@ -45,7 +46,7 @@ data ClientConfig = ClientConfig {
   , ccALPN       :: Version -> IO (Maybe [ByteString])
   , ccValidate   :: Bool
   , ccResumption :: ResumptionInfo
-  , ccEarlyData  :: Maybe (StreamId,ByteString)
+  , ccUse0RTT    :: Bool
   , ccConfig     :: Config
   }
 
@@ -53,11 +54,11 @@ data ClientConfig = ClientConfig {
 defaultClientConfig :: ClientConfig
 defaultClientConfig = ClientConfig {
     ccServerName = "127.0.0.1"
-  , ccPortName   = "13443"
+  , ccPortName   = "4433"
   , ccALPN       = \_ -> return Nothing
   , ccValidate   = False
   , ccResumption = defaultResumptionInfo
-  , ccEarlyData  = Nothing
+  , ccUse0RTT    = False
   , ccConfig     = defaultConfig
   }
 
@@ -78,7 +79,7 @@ data ServerConfig = ServerConfig {
 -- | The default value for server configuration.
 defaultServerConfig :: ServerConfig
 defaultServerConfig = ServerConfig {
-    scAddresses      = [("127.0.0.1",13443)]
+    scAddresses      = [("127.0.0.1",4433)]
   , scKey            = "serverkey.pem"
   , scCert           = "servercert.pem"
   , scALPN           = Nothing

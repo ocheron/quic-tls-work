@@ -1,16 +1,25 @@
-{-# LANGUAGE RecordWildCards #-}
-
 -- | This main module provides APIs for QUIC.
 module Network.QUIC (
   -- * Running a QUIC client and server
     runQUICClient
   , runQUICServer
   , stopQUICServer
+  , Connection
+  , isConnectionOpen
+  -- * Stream
+  , Stream
+  , stream
+  , unidirectionalStream
+  , streamId
+  , StreamId
   -- * IO
   , recvStream
   , sendStream
+  , sendStreamMany
   , shutdownStream
-  , isStreamOpen
+  -- * Server
+  , acceptStream
+  -- * Client
   , migration
   , Migration(..)
   -- * Configrations
@@ -21,14 +30,11 @@ module Network.QUIC (
   , Config(..)
   , defaultConfig
   -- * Types
-  , Connection
   , connDebugLog
-  , StreamId
   , isClientInitiatedBidirectional
   , isServerInitiatedBidirectional
   , isClientInitiatedUnidirectional
   , isServerInitiatedUnidirectional
-  , Fin
   , Version(..)
   , fromVersion
   , CID
@@ -44,15 +50,19 @@ module Network.QUIC (
   , getResumptionInfo
   , isResumptionPossible
   , is0RTTPossible
+  , clientCertificateChain
   -- * Errors
   , QUICError(..)
+  -- * Synchronization
+  , wait1RTTReady
+  , waitEstablished
   ) where
 
 import Network.QUIC.Client
 import Network.QUIC.Config
 import Network.QUIC.Connection
-import Network.QUIC.Core
 import Network.QUIC.IO
 import Network.QUIC.Packet
 import Network.QUIC.Parameters
+import Network.QUIC.Run
 import Network.QUIC.Types

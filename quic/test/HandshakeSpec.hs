@@ -2,16 +2,13 @@
 
 module HandshakeSpec where
 
-import Control.Concurrent
 import Control.Concurrent.Async
 import Control.Monad
-import Data.ByteString
 import Data.IORef
 import Network.TLS
 import Test.Hspec
 
 import Network.QUIC
-import Network.QUIC.Connection
 
 spec :: Spec
 spec = do
@@ -40,7 +37,7 @@ spec = do
                 sc = defaultServerConfig {
                        scSessionManager = smgr
                      }
-            testHandshake2 cc sc (FullHandshake, PreSharedKey) Nothing
+            testHandshake2 cc sc (FullHandshake, PreSharedKey) False
         it "can handshake in the case of 0-RTT" $ do
             smgr <- newSessionManager
             let cc = defaultClientConfig
@@ -48,7 +45,7 @@ spec = do
                        scSessionManager = smgr
                      , scEarlyDataSize  = 1024
                      }
-            testHandshake2 cc sc (FullHandshake, RTT0) (Just "early data")
+            testHandshake2 cc sc (FullHandshake, RTT0) True
 
 testHandshake :: ClientConfig -> ServerConfig -> HandshakeMode13 -> IO ()
 testHandshake cc sc mode = void $ concurrently client server
@@ -59,15 +56,16 @@ testHandshake cc sc mode = void $ concurrently client server
           }
     client = runQUICClient cc $ \conn -> do
         isConnectionOpen conn `shouldReturn` True
-        getTLSMode conn `shouldReturn` mode
+        waitEstablished conn
+        handshakeMode <$> getConnectionInfo conn `shouldReturn` mode
     server = runQUICServer sc' $ \conn -> do
         isConnectionOpen conn `shouldReturn` True
-        threadDelay 100000 -- waiting for CF
-        getTLSMode conn `shouldReturn` mode
+        waitEstablished conn
+        handshakeMode <$> getConnectionInfo conn `shouldReturn` mode
         stopQUICServer conn
 
-testHandshake2 :: ClientConfig -> ServerConfig -> (HandshakeMode13, HandshakeMode13) -> Maybe ByteString -> IO ()
-testHandshake2 cc1 sc (mode1, mode2) mEarlyData = void $ concurrently client server
+testHandshake2 :: ClientConfig -> ServerConfig -> (HandshakeMode13, HandshakeMode13) -> Bool -> IO ()
+testHandshake2 cc1 sc (mode1, mode2) use0RTT = void $ concurrently client server
   where
     sc' = sc {
             scKey  = "test/serverkey.pem"
@@ -75,22 +73,20 @@ testHandshake2 cc1 sc (mode1, mode2) mEarlyData = void $ concurrently client ser
           }
     runClient cc mode = runQUICClient cc $ \conn -> do
         isConnectionOpen conn `shouldReturn` True
-        getTLSMode conn `shouldReturn` mode
-        threadDelay 100000 -- waiting for NST
+        waitEstablished conn
+        handshakeMode <$> getConnectionInfo conn `shouldReturn` mode
         getResumptionInfo conn
     client = do
         res <- runClient cc1 mode1
         let cc2 = cc1 { ccResumption = res
-                      , ccEarlyData = case mEarlyData of
-                          Nothing -> Nothing
-                          Just bs -> Just (0, bs)
+                      , ccUse0RTT    = use0RTT
                       }
         void $ runClient cc2 mode2
     server = do
         ref <- newIORef (0 :: Int)
         runQUICServer sc' $ \conn -> do
             isConnectionOpen conn `shouldReturn` True
-            threadDelay 100000 -- waiting for CF
+            waitEstablished conn
             n <- readIORef ref
             if n >= 1 then stopQUICServer conn else writeIORef ref (n + 1)
 

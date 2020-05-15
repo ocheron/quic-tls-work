@@ -5,7 +5,7 @@ module Network.QUIC.Receiver (
     receiver
   ) where
 
-import Network.TLS.QUIC hiding (RTT0)
+import qualified Control.Exception as E
 
 import Network.QUIC.Connection
 import Network.QUIC.Exception
@@ -19,13 +19,23 @@ receiver conn recv = handleLog logAction $ do
     loopHandshake
     loopEstablished
   where
+    recvTimeout = do
+        -- The spec says that CC is not sent when timeout.
+        -- But we intentionally sends CC when timeout.
+        -- fixme: 30 sec comes from Warp
+        mx <- timeout 30000000 recv
+        case mx of
+          Nothing -> do
+              putInput conn $ InpError ConnectionIsTimeout
+              E.throwIO Break
+          Just x  -> return x
     loopHandshake = do
-        cpkt <- recv
+        cpkt <- recvTimeout
         processCryptPacketHandshake conn cpkt
         established <- isConnectionEstablished conn
         unless established loopHandshake
     loopEstablished = forever $ do
-        CryptPacket hdr crypt <- recv
+        CryptPacket hdr crypt <- recvTimeout
         let cid = headerMyCID hdr
         included <- myCIDsInclude conn cid
         if included then do
@@ -68,7 +78,7 @@ processCryptPacket conn hdr crypt = do
               qlogReceived conn StatelessReset
               connDebugLog conn "Connection is reset statelessly"
               setCloseReceived conn
-              clearThreads conn
+              putInput conn $ InpError ConnectionIsReset
             else do
               qlogDropped conn hdr
               connDebugLog conn $ "Cannot decrypt: " ++ show level
@@ -114,22 +124,13 @@ processFrame conn RTT1Level (PathResponse dat) =
     checkResponse conn dat
 processFrame conn _ (ConnectionCloseQUIC err ftyp reason) = do
     putInput conn $ InpTransportError err ftyp reason
-    -- to cancel handshake
-    putCrypto conn $ InpTransportError err ftyp reason
-    setCloseSent conn
     setCloseReceived conn
-    clearThreads conn
 processFrame conn _ (ConnectionCloseApp err reason) = do
-    connDebugLog conn $ "processFrame: ConnectionCloseApp " ++ show err
     putInput conn $ InpApplicationError err reason
-    -- to cancel handshake
-    putCrypto conn $ InpApplicationError err reason
-    setCloseSent conn
     setCloseReceived conn
-    clearThreads conn
-processFrame conn RTT0Level (Stream sid off (dat:_) fin) = do
+processFrame conn RTT0Level (StreamF sid off (dat:_) fin) = do
     putInputStream conn sid off dat fin
-processFrame conn RTT1Level (Stream sid off (dat:_) fin) =
+processFrame conn RTT1Level (StreamF sid off (dat:_) fin) =
     putInputStream conn sid off dat fin
 processFrame conn lvl Ping = do
     -- An implementation sends:
@@ -143,9 +144,7 @@ processFrame conn lvl Ping = do
 processFrame conn _ HandshakeDone = do
     setConnectionEstablished conn
     fire 2000000 $ do
-        control <- getClientController conn
-        ClientHandshakeDone <- control ExitClient
-        clearClientController conn
+        killHandshaker conn
         dropSecrets conn
 processFrame conn _ _frame        = do
     connDebugLog conn $ "processFrame: " ++ show _frame

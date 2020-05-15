@@ -4,8 +4,8 @@ module Network.QUIC.Connection (
   , serverConnection
   , isClient
   , isServer
-  -- * Backend
-  , connClose
+  -- * IO
+  , closeSockets
   , connDebugLog
   , connQLog
   -- * Packet numbers
@@ -63,8 +63,9 @@ module Network.QUIC.Connection (
   , clearThreads
   , getSockInfo
   , setSockInfo
-  , getNextVersion
-  , setNextVersion
+  , killHandshaker
+  , setKillHandshaker
+  , clearKillHandshaker
   -- * Transmit
   , keepPlainPacket
   , releasePlainPacket
@@ -75,34 +76,39 @@ module Network.QUIC.Connection (
   -- * State
   , isConnectionOpen
   , isConnectionEstablished
+  , isConnection1RTTReady
+  , setConnection0RTTReady
+  , setConnection1RTTReady
   , setConnectionEstablished
   , setCloseSent
   , setCloseReceived
   , isCloseSent
+  , wait0RTTReady
+  , wait1RTTReady
   , waitEstablished
   , waitClosed
+  -- * Stream
+  , getMyNewStreamId
+  , getMyNewUniStreamId
+  , getPeerStreamID
+  , setPeerStreamID
   -- * StreamTable
-  , getStreamOffset
   , putInputStream
-  , getCryptoOffset
   , putInputCrypto
-  , getStreamFin
-  , setStreamFin
+  , insertStream
+  , insertCryptoStreams
+  , getCryptoOffset
   -- * Queue
   , takeInput
   , putInput
   , takeCrypto
   , putCrypto
   , takeOutput
+  , tryPeekOutput
   , putOutput
+  , putOutput'
   , putOutputPP
   -- * Role
-  , getClientController
-  , setClientController
-  , clearClientController
-  , getServerController
-  , setServerController
-  , clearServerController
   , setToken
   , getToken
   , getResumptionInfo
@@ -117,6 +123,8 @@ module Network.QUIC.Connection (
   , getTokenManager
   , setMainThreadId
   , getMainThreadId
+  , setCertificateChain
+  , getCertificateChain
   -- Qlog
   , qlogReceived
   , qlogSent
@@ -137,6 +145,7 @@ import Network.QUIC.Connection.PacketNumber
 import Network.QUIC.Connection.Queue
 import Network.QUIC.Connection.Role
 import Network.QUIC.Connection.State
+import Network.QUIC.Connection.Stream
 import Network.QUIC.Connection.StreamTable
 import Network.QUIC.Connection.Transmit
 import Network.QUIC.Connection.Types

@@ -51,7 +51,7 @@ encodeFrame wbuf (NewToken token) = do
     write8 wbuf 0x07
     encodeInt' wbuf $ fromIntegral $ B.length token
     copyByteString wbuf token
-encodeFrame wbuf (Stream sid off dats fin) = do
+encodeFrame wbuf (StreamF sid off dats fin) = do
     let flag0 = 0x08 .|. 0x02 -- len
         flag1 | off /= 0  = flag0 .|. 0x04 -- off
               | otherwise = flag0
@@ -64,8 +64,8 @@ encodeFrame wbuf (Stream sid off dats fin) = do
     mapM_ (copyByteString wbuf) dats
 encodeFrame wbuf (MaxStreams dir ms) = do
     case dir of
-      Bidi -> write8 wbuf 0x12
-      Uni  -> write8 wbuf 0x13
+      Bidirectional  -> write8 wbuf 0x12
+      Unidirectional -> write8 wbuf 0x13
     encodeInt' wbuf $ fromIntegral ms
 encodeFrame wbuf (NewConnectionID cidInfo rpt) = do
     write8 wbuf 0x18
@@ -131,8 +131,8 @@ decodeFrame rbuf = do
               decodeStreamFrame rbuf off len fin
       0x10 -> decodeMaxData rbuf
       0x11 -> decodeMaxStreamData rbuf
-      0x12 -> decodeMaxStreams rbuf Bidi
-      0x13 -> decodeMaxStreams rbuf Uni
+      0x12 -> decodeMaxStreams rbuf Bidirectional
+      0x13 -> decodeMaxStreams rbuf Unidirectional
       0x18 -> decodeNewConnectionID rbuf
       0x19 -> decodeRetireConnectionID rbuf
       0x1a -> decodePathChallenge rbuf
@@ -207,7 +207,7 @@ decodeStreamFrame rbuf hasOff hasLen fin = do
            else do
              len <- remainingSize rbuf
              extractByteString rbuf len
-    return $ Stream sID off [dat] fin
+    return $ StreamF sID off [dat] fin
 
 decodeMaxData :: ReadBuffer -> IO Frame
 decodeMaxData rbuf = MaxData . fromIntegral <$> decodeInt' rbuf

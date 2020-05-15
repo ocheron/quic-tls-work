@@ -10,7 +10,6 @@ import Control.Monad
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as C8
-import Network.TLS.Extra.Cipher
 import System.Console.GetOpt
 import System.Environment
 import System.Exit
@@ -149,10 +148,6 @@ main = do
                                    exampleParameters
               , confKeyLog     = getLogger optKeyLogFile
               , confGroups     = getGroups optGroups
-              , confCiphers    = [ cipher_TLS13_AES256GCM_SHA384
-                                 , cipher_TLS13_AES128GCM_SHA256
-                                 , cipher_TLS13_AES128CCM_SHA256
-                                 ]
               , confDebugLog   = getStdoutLogger optDebugLog
               , confQLog       = getDirLogger optQLogDir ".qlog"
               }
@@ -164,7 +159,7 @@ main = do
 runClient :: ClientConfig -> Options -> ByteString -> String -> (String -> IO ()) -> IO ()
 runClient conf opts@Options{..} cmd addr debug = do
     debug "------------------------"
-    (info1,info2,res,mig) <- runQUICClient conf $ \conn -> do
+    (info1,info2,res,mig, client') <- runQUICClient conf $ \conn -> do
         i1 <- getConnectionInfo conn
         let client = case alpn i1 of
               Just proto | "hq" `BS.isPrefixOf` proto -> clientHQ cmd
@@ -179,7 +174,7 @@ runClient conf opts@Options{..} cmd addr debug = do
         debug "\n------------------------"
         i2 <- getConnectionInfo conn
         r <- getResumptionInfo conn
-        return (i1, i2, r, m)
+        return (i1, i2, r, m, client)
     if optVerNego then do
         putStrLn "Result: (V) version negotiation  ... OK"
         exitSuccess
@@ -188,7 +183,7 @@ runClient conf opts@Options{..} cmd addr debug = do
         exitSuccess
       else if optResumption then do
         if isResumptionPossible res then do
-            info3 <- runClient2 conf opts cmd addr debug res
+            info3 <- runClient2 conf opts debug res client'
             if handshakeMode info3 == PreSharedKey then do
                 putStrLn "Result: (R) TLS resumption ... OK"
                 exitSuccess
@@ -200,7 +195,7 @@ runClient conf opts@Options{..} cmd addr debug = do
             exitFailure
       else if opt0RTT then do
         if is0RTTPossible res then do
-            info3 <- runClient2 conf opts cmd addr debug res
+            info3 <- runClient2 conf opts debug res client'
             if handshakeMode info3 == RTT0 then do
                 putStrLn "Result: (Z) 0-RTT ... OK"
                 exitSuccess
@@ -250,65 +245,66 @@ runClient conf opts@Options{..} cmd addr debug = do
                  putStrLn "Result: (D) stream data ... OK"
                  exitSuccess
 
-runClient2 :: ClientConfig -> Options -> ByteString -> String -> (String -> IO ()) -> ResumptionInfo -> IO ConnectionInfo
-runClient2 conf Options{..} cmd addr debug res = do
+runClient2 :: ClientConfig -> Options -> (String -> IO ()) -> ResumptionInfo -> (Connection -> (String -> IO ()) -> IO ()) -> IO ConnectionInfo
+runClient2 conf Options{..} debug res client = do
     threadDelay 100000
     debug "<<<< next connection >>>>"
     debug "------------------------"
     runQUICClient conf' $ \conn -> do
-        info <- getConnectionInfo conn
         if rtt0 then do
             debug "------------------------ Response for early data"
-            (sid, bs, _fin) <- recvStream conn
-            debug $ "SID: " ++ show sid
-            debug $ show $ BS.unpack bs
-            debug "------------------------ Response for early data"
-          else do
-            let client = case alpn info of
-                  Just proto | "hq" `BS.isPrefixOf` proto -> clientHQ cmd
-                  _                                       -> clientH3 addr
             void $ client conn debug
-        return info
+            debug "------------------------ Response for early data"
+            waitEstablished conn
+            getConnectionInfo conn
+          else do
+            void $ client conn debug
+            getConnectionInfo conn
   where
     rtt0 = opt0RTT && is0RTTPossible res
     conf' | rtt0 = conf {
                 ccResumption = res
-              , ccEarlyData  = Just (0, cmd) -- fixme
+              , ccUse0RTT    = True
               }
           | otherwise = conf { ccResumption = res }
 
 clientHQ :: ByteString -> Connection -> (String -> IO ()) -> IO ()
 clientHQ cmd conn debug = do
-    sendStream conn 0 cmd True
-    shutdownStream conn 0
-    loop
+    s <- stream conn
+    sendStream s cmd
+    shutdownStream s
+    loop s
   where
-    loop = do
-        (sid, bs, fin) <- recvStream conn
-        when (sid /= 0) $ debug $ "SID: " ++ show sid
-        when (bs /= "") $ debug $ C8.unpack bs
-        if fin then
+    loop s = do
+        bs <- recvStream s 1024
+        if bs == "" then
             debug "Connection finished"
-          else
-            loop
+          else do
+            debug $ C8.unpack bs
+            loop s
 
 clientH3 :: String -> Connection -> (String -> IO ()) -> IO ()
 clientH3 authority conn debug = do
     hdrblk <- taglen 1 <$> qpackClient authority
+    s0 <- stream conn
+    s2 <- unidirectionalStream conn
+    s6 <- unidirectionalStream conn
+    s10 <- unidirectionalStream conn
     -- 0: control, 4 settings
-    sendStream conn  2 (BS.pack [0,4,8,1,80,0,6,128,0,128,0]) False
+    sendStream s2 (BS.pack [0,4,8,1,80,0,6,128,0,128,0])
     -- 2: from encoder to decoder
-    sendStream conn  6 (BS.pack [2]) False
+    sendStream s6 (BS.pack [2])
     -- 3: from decoder to encoder
-    sendStream conn 10 (BS.pack [3]) False
-    sendStream conn  0 hdrblk True
-    loop
+    sendStream s10 (BS.pack [3])
+    sendStream s0 hdrblk
+    shutdownStream s0
+    loop s0
   where
-    loop = do
-        (sid, bs, fin) <- recvStream conn
-        debug $ "SID: " ++ show sid
-        when (bs /= "") $ debug $ show $ BS.unpack bs
-        if fin then
+    loop s0 = do
+        bs <- recvStream s0 1024
+        debug $ "SID: " ++ show (streamId s0)
+        if bs == "" then
             debug "Connection finished"
-          else
-            loop
+          else do
+            debug $ show $ BS.unpack bs
+            loop s0

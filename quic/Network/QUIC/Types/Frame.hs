@@ -11,7 +11,7 @@ import Network.QUIC.Types.Error
 
 type FrameType = Int
 
-data Direction = Uni | Bidi deriving (Eq, Show)
+data Direction = Unidirectional | Bidirectional deriving (Eq, Show)
 
 data Frame = Padding Int
            | Ping
@@ -20,7 +20,7 @@ data Frame = Padding Int
            | StopSending StreamId ApplicationError
            | Crypto Offset CryptoData
            | NewToken Token
-           | Stream StreamId Offset [StreamData] Fin
+           | StreamF StreamId Offset [StreamData] Fin
            | MaxData Int
            | MaxStreamData StreamId Int
            | MaxStreams Direction Int
