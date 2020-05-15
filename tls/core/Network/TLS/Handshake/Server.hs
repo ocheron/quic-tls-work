@@ -11,7 +11,6 @@ module Network.TLS.Handshake.Server
     , handshakeServerWith
     , requestCertificateServer
     , postHandshakeAuthServerWith
-    , quicMaxEarlyDataSize
     ) where
 
 import Network.TLS.Parameters
@@ -749,7 +748,7 @@ doHandshake13 sparams ctx chosenVersion usedCipher exts usedHash clientKeyShare 
             clientHandshakeSecret = triClient handKey
             handSecret = triBase handKey
         liftIO $ do
-            if rtt0OK && rtt0max /= quicMaxEarlyDataSize
+            if rtt0OK && not (ctxQUICMode ctx)
                 then setRxState ctx usedHash usedCipher clientEarlySecret
                 else setRxState ctx usedHash usedCipher clientHandshakeSecret
             setTxState ctx usedHash usedCipher serverHandshakeSecret
@@ -757,7 +756,7 @@ doHandshake13 sparams ctx chosenVersion usedCipher exts usedHash clientKeyShare 
                  | is0RTTvalid = Just $ EarlySecretInfo usedCipher clientEarlySecret
                  | otherwise   = Nothing
                 handSecInfo = HandshakeSecretInfo usedCipher (clientHandshakeSecret,serverHandshakeSecret)
-            contextSync ctx $ SendServerHelloI exts mEarlySecInfo handSecInfo
+            contextSync ctx $ SendServerHello exts mEarlySecInfo handSecInfo
     ----------------------------------------------------------------
         sendExtensions rtt0OK protoExt
         case mCredInfo of
@@ -784,7 +783,7 @@ doHandshake13 sparams ctx chosenVersion usedCipher exts usedHash clientKeyShare 
          | hrr                      = HelloRetryRequest
          | otherwise                = FullHandshake
     let appSecInfo = ApplicationSecretInfo mode alpn (clientApplicationSecret0,serverApplicationSecret0)
-    contextSync ctx $ SendServerFinishedI appSecInfo
+    contextSync ctx $ SendServerFinished appSecInfo
     ----------------------------------------------------------------
     if rtt0OK then
         setEstablished ctx (EarlyDataAllowed rtt0max)
@@ -797,7 +796,6 @@ doHandshake13 sparams ctx chosenVersion usedCipher exts usedHash clientKeyShare 
             handshakeTerminate13 ctx
             setRxState ctx usedHash usedCipher clientApplicationSecret0
             sendNewSessionTicket applicationSecret sfSentTime
-            contextSync ctx $ SendSessionTicketI
         expectFinished _ hs = unexpected (show hs) (Just "finished 13")
 
     let expectEndOfEarlyData EndOfEarlyData13 =
@@ -810,9 +808,7 @@ doHandshake13 sparams ctx chosenVersion usedCipher exts usedHash clientKeyShare 
           unless skip $ recvHandshake13hash ctx (expectCertVerify sparams ctx)
           recvHandshake13hash ctx expectFinished
           ensureRecvComplete ctx
-      else if rtt0OK && rtt0max == quicMaxEarlyDataSize then
-        setPendingActions ctx [PendingActionHash True expectFinished]
-      else if rtt0OK then
+      else if rtt0OK && not (ctxQUICMode ctx) then
         setPendingActions ctx [PendingAction True expectEndOfEarlyData
                               ,PendingActionHash True expectFinished]
       else
@@ -1007,8 +1003,8 @@ expectCertVerify sparams ctx hChCc (CertVerify13 sigAlg sig) = liftIO $ do
     clientCertVerify sparams ctx certs verif
 expectCertVerify _ _ _ hs = unexpected (show hs) (Just "certificate verify 13")
 
-helloRetryRequest :: MonadIO m => ServerParams -> Context -> Version -> Cipher -> [ExtensionRaw] -> [Group] -> Session -> m ()
-helloRetryRequest sparams ctx chosenVersion usedCipher exts serverGroups clientSession = liftIO $ do
+helloRetryRequest :: ServerParams -> Context -> Version -> Cipher -> [ExtensionRaw] -> [Group] -> Session -> IO ()
+helloRetryRequest sparams ctx chosenVersion usedCipher exts serverGroups clientSession = do
     twice <- usingState_ ctx getTLS13HRR
     when twice $
         throwCore $ Error_Protocol ("Hello retry not allowed again", True, HandshakeFailure)
@@ -1200,10 +1196,6 @@ postHandshakeAuthServerWith sparams ctx h@(Certificate13 certCtx certs _ext) = d
 postHandshakeAuthServerWith _ _ _ =
     throwCore $ Error_Protocol ("unexpected handshake message received in postHandshakeAuthServerWith", True, UnexpectedMessage)
 
-contextSync :: Context -> ServerStatusI -> IO ()
+contextSync :: Context -> ServerState -> IO ()
 contextSync ctx ctl = case ctxHandshakeSync ctx of
     HandshakeSync _ sync -> sync ctl
-
--- | Max early data size for QUIC.
-quicMaxEarlyDataSize :: Int
-quicMaxEarlyDataSize = 0xffffffff
