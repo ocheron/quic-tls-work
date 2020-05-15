@@ -274,7 +274,7 @@ handshakeClient' cparams ctx groups mparams = do
                               where noSessionEMS = SessionEMS `notElem` sessionFlags sdata
                     -- In compatibility mode a client not offering a pre-TLS 1.3
                     -- session MUST generate a new 32-byte value
-                    if tls13 && paramSession == Session Nothing
+                    if tls13 && paramSession == Session Nothing && not (ctxQUICMode ctx)
                         then do
                             randomSession <- newSession ctx
                             return (crand, randomSession)
@@ -298,7 +298,7 @@ handshakeClient' cparams ctx groups mparams = do
             mEarlySecInfo <- case rtt0info of
                Nothing   -> return Nothing
                Just info -> Just <$> send0RTT info
-            contextSync ctx $ SendClientHelloI mEarlySecInfo
+            contextSync ctx $ SendClientHello mEarlySecInfo
             return (rtt0, map (\(ExtensionRaw i _) -> i) extensions)
 
         get0RTTinfo (_, sdata, choice, _) = do
@@ -314,12 +314,12 @@ handshakeClient' cparams ctx groups mparams = do
                 -- But HandshakeDigestContext is not created yet.
                 earlyKey <- calculateEarlySecret ctx choice (Right earlySecret) False
                 let clientEarlySecret = pairClient earlyKey
-                when (earlyData /= quicEarlyData) $ do
+                unless (ctxQUICMode ctx) $ do
                     runPacketFlight ctx $ sendChangeCipherSpec13 ctx
                     setTxState ctx usedHash usedCipher clientEarlySecret
                     let len = ctxFragmentSize ctx
                     mapChunks_ len (sendPacket13 ctx . AppData13) earlyData
-                -- We set RTT0Sent for QUIC even if earlyData == "".
+                -- We set RTT0Sent even in quicMode
                 usingHState ctx $ setTLS13RTT0Status RTT0Sent
                 return $ EarlySecretInfo usedCipher clientEarlySecret
 
@@ -335,7 +335,7 @@ handshakeClient' cparams ctx groups mparams = do
                                         else throwAlert a
                                 _ -> throwAlert a
                         _ -> unexpected (show p) (Just "handshake")
-                throwAlert a = usingState_ ctx $ throwError $ Error_Protocol ("expecting server hello, got alert : " ++ show a, True, HandshakeFailure)
+                throwAlert a = throwCore $ Error_Protocol ("expecting server hello, got alert : " ++ show a, True, HandshakeFailure)
 
 -- | Store the keypair and check that it is compatible with the current protocol
 -- version and a list of 'CertificateType' values.
@@ -864,7 +864,7 @@ handshakeClient13' cparams ctx groupSent choice = do
         clientHandshakeSecret = triClient hkey
         serverHandshakeSecret = triServer hkey
         handSecInfo = HandshakeSecretInfo usedCipher (clientHandshakeSecret,serverHandshakeSecret)
-    contextSync ctx $ RecvServerHelloI handSecInfo
+    contextSync ctx $ RecvServerHello handSecInfo
     (rtt0accepted,eexts) <- runRecvHandshake13 $ do
         accext <- recvHandshake13 ctx expectEncryptedExtensions
         unless resuming $ recvHandshake13 ctx expectCertRequest
@@ -872,8 +872,7 @@ handshakeClient13' cparams ctx groupSent choice = do
         return accext
     hChSf <- transcriptHash ctx
     runPacketFlight ctx $ sendChangeCipherSpec13 ctx
-    let earlyData = clientEarlyData cparams
-    when (rtt0accepted && earlyData /= Just quicEarlyData) $
+    when (rtt0accepted && not (ctxQUICMode ctx)) $
         sendPacket13 ctx (Handshake13 [EndOfEarlyData13])
     setTxState ctx usedHash usedCipher clientHandshakeSecret
     sendClientFlight13 cparams ctx usedHash clientHandshakeSecret
@@ -883,7 +882,7 @@ handshakeClient13' cparams ctx groupSent choice = do
     alpn <- usingState_ ctx getNegotiatedProtocol
     mode <- usingHState ctx getTLS13HandshakeMode
     let appSecInfo = ApplicationSecretInfo mode alpn (triClient appKey, triServer appKey)
-    contextSync ctx $ SendClientFinishedI eexts appSecInfo
+    contextSync ctx $ SendClientFinished eexts appSecInfo
     handshakeTerminate13 ctx
   where
     usedCipher = cCipher choice
@@ -1092,9 +1091,6 @@ postHandshakeAuthClientWith cparams ctx h@(CertRequest13 certReqCtx exts) =
 postHandshakeAuthClientWith _ _ _ =
     throwCore $ Error_Protocol ("unexpected handshake message received in postHandshakeAuthClientWith", True, UnexpectedMessage)
 
-contextSync :: Context -> ClientStatusI -> IO ()
+contextSync :: Context -> ClientState -> IO ()
 contextSync ctx ctl = case ctxHandshakeSync ctx of
     HandshakeSync sync _ -> sync ctl
-
-quicEarlyData :: ByteString
-quicEarlyData = ""

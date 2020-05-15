@@ -73,9 +73,8 @@ import Network.TLS.State
 import Network.TLS.Hooks
 import Network.TLS.Record.State
 import Network.TLS.Record.Layer
-import Network.TLS.IO
-import Network.TLS.Sending
-import Network.TLS.Sending13
+import Network.TLS.Record.Reading
+import Network.TLS.Record.Writing
 import Network.TLS.Parameters
 import Network.TLS.Measurement
 import Network.TLS.Types (Role(..))
@@ -190,6 +189,7 @@ contextNew backend params = liftIO $ do
             , ctxKeyLogger        = debugKeyLogger debug
             , ctxRecordLayer      = recordLayer
             , ctxHandshakeSync    = HandshakeSync syncNoOp syncNoOp
+            , ctxQUICMode         = False
             }
 
         syncNoOp _ = return ()
