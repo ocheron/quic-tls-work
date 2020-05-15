@@ -2,9 +2,9 @@
 
 Experiments and WIP based on projects:
 
-- [tls](https://github.com/vincenthz/hs-tls) at commit `5ddf3e00`
+- [tls](https://github.com/vincenthz/hs-tls) at commit `3727b12b`
 
-- [quic](https://github.com/kazu-yamamoto/quic) at commit `2ddb37b3`
+- [quic](https://github.com/kazu-yamamoto/quic) at commit `a32ac198`
 
 ## To do
 
@@ -15,12 +15,6 @@ Experiments and WIP based on projects:
 - See if it is possible to avoid repeating the TLS cipher in the `SecretInfo`
   data types.  Similarly, handshake mode and negotiated protocol could be
   available from the TLS context through API.
-
-- Verify if the new handshake ACK logic gives expected result.  Unclear if the
-  frame should be sent before or after new receive.
-
-- Verify if `quic` IORefs modified by the TLS to QUIC callbacks need atomic
-  modify or not.
 
 - More generic interface to insert/extract some content in TLS extensions.
   Could be applicable to TLS < 1.3 as well.  And to all message types.

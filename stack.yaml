@@ -7,9 +7,8 @@ packages:
 
 extra-deps:
 - crypto-token-0.0.0.0@sha256:d675ce76686c255c61cfbda1824819b9c4199313ba84fd09d809d20f4c2d94d5,864
+- network-byte-order-0.1.5@sha256:d59fd5b521599126c44033cc7418e1027abd58a8d673aee9dc070fa40384455e,1299
 - git: https://github.com/haskell/network.git
   commit: 54b872f7c80ecffa1d59451e77d3c54dd3251c64
 - git: https://github.com/kazu-yamamoto/http2.git
   commit: b390aeeeadd3216813a6751ef1d2879a3c1eeec5
-- git: https://github.com/kazu-yamamoto/network-byte-order.git
-  commit: 4f5b9211c97a27310cb90b5a117b5cd7eb0d78ef
