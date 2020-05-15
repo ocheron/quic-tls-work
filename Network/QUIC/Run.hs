@@ -3,12 +3,13 @@
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module Network.QUIC.Core where
+module Network.QUIC.Run where
 
 import Control.Concurrent
 import qualified Control.Exception as E
 import qualified Data.ByteString.Char8 as C8
 import Data.IORef
+import Data.X509 (CertificateChain)
 import Foreign.Marshal.Alloc (free)
 import qualified Network.Socket as NS
 import qualified Network.Socket.ByteString as NSB
@@ -21,6 +22,7 @@ import Network.QUIC.Connection
 import Network.QUIC.Exception
 import Network.QUIC.Handshake
 import Network.QUIC.Imports
+import Network.QUIC.Packet
 import Network.QUIC.Parameters
 import Network.QUIC.Qlog
 import Network.QUIC.Receiver
@@ -62,8 +64,9 @@ connect conf = do
         handshakeClientConnection conf conn send recv qlogger `E.onException` cls
         return conn
     check se
-      | Just (NextVersion ver) <- E.fromException se = Right ver
-      | Just (e :: QUICError)  <- E.fromException se = Left e
+      | Just (NextVersion ver)   <- E.fromException se = Right ver
+      | Just (e :: QUICError)    <- E.fromException se = Left e
+      | Just (e :: TLSException) <- E.fromException se = Left (HandshakeFailed $ show e)
       | otherwise = Left $ BadThingHappen se
 
 createClientConnection :: ClientConfig -> Version
@@ -87,7 +90,9 @@ createClientConnection conf@ClientConfig{..} ver = do
         qlogger = newQlogger qq "client" (show peerCID) $ confQLog ccConfig peerCID
     debugLog $ "Original CID: " ++ show peerCID
     conn <- clientConnection conf ver myCID peerCID debugLog qLog cls sref
-    void $ forkIO $ readerClient (confVersions ccConfig) s0 q conn -- dies when s0 is closed.
+    insertCryptoStreams conn -- fixme: cleanup
+    mytid <- myThreadId
+    void $ forkIO $ readerClient mytid (confVersions ccConfig) s0 q conn -- dies when s0 is closed.
     let recv = recvClient q
     return (conn,send,recv,cls,qlogger)
 
@@ -100,15 +105,10 @@ handshakeClientConnection conf@ClientConfig{..} conn send recv qlogger = do
     tid3 <- forkIO qlogger
     setThreadIds conn [tid0,tid1,tid2,tid3]
     handshakeClient conf conn `E.onException` clearThreads conn
-    tid4 <- forkIO $ getClientController conn >>= handshakeClientAsync conn
-    addThreadIds conn [tid4]
     params <- getPeerParameters conn
     case statelessResetToken params of
       Nothing  -> return ()
       Just srt -> setPeerStatelessResetToken conn srt
-    cidInfo <- getNewMyCID conn
-    let ncid = NewConnectionID cidInfo 0
-    putOutput conn $ OutControl RTT1Level [ncid]
     info <- getConnectionInfo conn
     connDebugLog conn $ show info
 
@@ -155,10 +155,12 @@ createServerConnection conf dispatch acc mainThreadId = do
             NS.close s
         setup = do
             conn <- serverConnection conf ver myCID peerCID oCID debugLog qLog cls sref
+            insertCryptoStreams conn -- fixme: cleanup
             when retried $ do
                 qlogRecvInitial conn
                 qlogSentRetry conn
-            setTokenManager conn $ tokenMgr dispatch
+            let mgr = tokenMgr dispatch
+            setTokenManager conn mgr
             setRetried conn retried
             let send bss = void $ do
                     (s,_) <- readIORef sref
@@ -171,10 +173,17 @@ createServerConnection conf dispatch acc mainThreadId = do
             setThreadIds conn [tid0,tid1,tid2,tid3]
             setMainThreadId conn mainThreadId
             handshakeServer conf oCID conn `E.onException` clearThreads conn
-            tid4 <- forkIO $ getServerController conn >>= handshakeServerAsync conn
-            addThreadIds conn [tid4]
             setRegister conn register unregister
             register myCID conn
+            --
+            cryptoToken <- generateToken =<< getVersion conn
+            token <- encryptToken mgr cryptoToken
+            cidInfo <- getNewMyCID conn
+            register (cidInfoCID cidInfo) conn
+            let ncid = NewConnectionID cidInfo 0
+            let frames = [NewToken token,ncid]
+            putOutput conn $ OutControl RTT1Level frames
+            --
             info <- getConnectionInfo conn
             debugLog $ show info
             return conn
@@ -196,9 +205,14 @@ close conn = do
     putOutput conn $ OutControl RTT1Level frames
     setCloseSent conn
     void $ timeout 100000 $ waitClosed conn -- fixme: timeout
+    when (isServer conn) $ do
+        unregister <- getUnregister conn
+        myCIDs <- getMyCIDs conn
+        mapM_ unregister myCIDs
+    killHandshaker conn
     clearThreads conn
     -- close the socket after threads reading/writing the socket die.
-    connClose conn
+    closeSockets conn
     free $ headerBuffer conn
     free $ payloadBuffer conn
 
@@ -256,3 +270,8 @@ instance Show ConnectionInfo where
                            ++ "Local SockAddr: " ++ show localSockAddr ++ "\n"
                            ++ "Remote SockAddr: " ++ show remoteSockAddr ++
                            if retry then "\nQUIC retry" else ""
+
+clientCertificateChain :: Connection -> IO (Maybe CertificateChain)
+clientCertificateChain conn
+  | isClient conn = return Nothing
+  | otherwise     = getCertificateChain conn

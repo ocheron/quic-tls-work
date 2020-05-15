@@ -9,10 +9,11 @@ import Control.Concurrent.STM
 import qualified Crypto.Token as CT
 import Data.Hourglass
 import Data.IORef
-import Data.Map (Map)
-import qualified Data.Map as Map
+import Data.IntMap (IntMap)
+import qualified Data.IntMap as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
+import Data.X509 (CertificateChain)
 import Foreign.Marshal.Alloc (mallocBytes)
 import Network.Socket (Socket)
 import Network.TLS.QUIC
@@ -31,37 +32,21 @@ data Role = Client | Server deriving (Eq, Show)
 
 ----------------------------------------------------------------
 
-data ConnectionState = Handshaking | Established | Closing CloseState deriving (Eq, Show)
+data ConnectionState = Handshaking
+                     | ReadyFor0RTT
+                     | ReadyFor1RTT
+                     | Established
+                     | Closing CloseState
+                     deriving (Eq, Ord, Show)
 
 data CloseState = CloseState {
     closeSent     :: Bool
   , closeReceived :: Bool
-  } deriving (Eq, Show)
+  } deriving (Eq, Ord, Show)
 
 ----------------------------------------------------------------
 
-data StreamInfo = StreamInfo {
-    siOff :: Offset
-  , siFin :: Fin
-  } deriving (Eq, Show)
-
-emptyStreamInfo :: StreamInfo
-emptyStreamInfo = StreamInfo 0 False
-
-data Reassemble = Reassemble StreamData Offset Int deriving (Eq, Show)
-
-data StreamState = StreamState {
-    sstx :: IORef StreamInfo
-  , ssrx :: IORef StreamInfo
-  , ssreass :: IORef [Reassemble]
-  }
-
-newStreamState :: IO StreamState
-newStreamState = StreamState <$> newIORef emptyStreamInfo
-                             <*> newIORef emptyStreamInfo
-                             <*> newIORef []
-
-newtype StreamTable = StreamTable (Map StreamId StreamState)
+newtype StreamTable = StreamTable (IntMap Stream)
 
 emptyStreamTable :: StreamTable
 emptyStreamTable = StreamTable Map.empty
@@ -90,33 +75,31 @@ dummySecrets = (ClientTrafficSecret "", ServerTrafficSecret "")
 
 ----------------------------------------------------------------
 
-data RoleInfo = ClientInfo { connClientCntrl    :: ClientController
-                           , clientInitialToken :: Token -- new or retry token
+data RoleInfo = ClientInfo { clientInitialToken :: Token -- new or retry token
                            , resumptionInfo     :: ResumptionInfo
                            }
-              | ServerInfo { connServerCntrl :: ServerController
-                           , tokenManager    :: ~CT.TokenManager
+              | ServerInfo { tokenManager    :: ~CT.TokenManager
                            , registerCID     :: CID -> Connection -> IO ()
                            , unregisterCID   :: CID -> IO ()
                            , askRetry        :: Bool
                            , mainThreadId    :: ~ThreadId
+                           , certChain       :: Maybe CertificateChain
                            }
 
 defaultClientRoleInfo :: RoleInfo
 defaultClientRoleInfo = ClientInfo {
-    connClientCntrl = nullClientController
-  , clientInitialToken = emptyToken
+    clientInitialToken = emptyToken
   , resumptionInfo = defaultResumptionInfo
   }
 
 defaultServerRoleInfo :: RoleInfo
 defaultServerRoleInfo = ServerInfo {
-    connServerCntrl = nullServerController
-  , tokenManager = undefined
+    tokenManager = undefined
   , registerCID = \_ _ -> return ()
   , unregisterCID = \_ -> return ()
   , askRetry = False
   , mainThreadId = undefined
+  , certChain = Nothing
   }
 
 -- fixme: limitation
@@ -150,11 +133,12 @@ data Connection = Connection {
   , roleInfo          :: IORef RoleInfo
   , quicVersion       :: IORef Version
   -- Actions
-  , connClose         :: Close
+  , closeSockets      :: Close
   , connDebugLog      :: LogAction
   , connQLog          :: QlogMsg -> IO ()
   -- Manage
   , threadIds         :: IORef [Weak ThreadId]
+  , killHandshakerAct :: IORef (IO ())
   , sockInfo          :: IORef (Socket,RecvQ)
   -- Mine
   , myCIDDB           :: IORef CIDDB
@@ -172,9 +156,13 @@ data Connection = Connection {
   , packetNumber      :: IORef PacketNumber      -- squeezing three to one
   , peerPacketNumbers :: IORef PeerPacketNumbers -- squeezing three to one
   , streamTable       :: IORef StreamTable
+  , myStreamId        :: IORef StreamId
+  , myUniStreamId     :: IORef StreamId
+  , peerStreamId      :: IORef StreamId
   -- TLS
   , encryptionLevel   :: TVar EncryptionLevel -- to synchronize
   , pendingHandshake  :: TVar [CryptPacket]
+  , pendingRTT0       :: TVar [CryptPacket]
   , pendingRTT1       :: TVar [CryptPacket]
   , iniSecrets        :: IORef (TrafficSecrets InitialSecret)
   , elySecInfo        :: IORef EarlySecretInfo
@@ -185,8 +173,6 @@ data Connection = Connection {
   , headerBufferSize  :: BufferSize
   , payloadBuffer     :: Buffer
   , payloadBufferSize :: BufferSize
-  -- Misc
-  , nextVersion       :: IORef (Maybe Version)
   }
 
 newConnection :: Role -> Version -> CID -> CID
@@ -204,6 +190,7 @@ newConnection rl ver myCID peerCID debugLog qLog close sref isecs =
         <*> return qLog
         -- Manage
         <*> newIORef []
+        <*> newIORef (return ())
         <*> return sref
         -- Mine
         <*> newIORef (newCIDDB myCID)
@@ -221,8 +208,12 @@ newConnection rl ver myCID peerCID debugLog qLog close sref isecs =
         <*> newIORef 0
         <*> newIORef (PeerPacketNumbers Set.empty)
         <*> newIORef emptyStreamTable
+        <*> newIORef (if isclient then 0 else 1)
+        <*> newIORef (if isclient then 2 else 3)
+        <*> newIORef (if isclient then 1 else 0)
         -- TLS
         <*> newTVarIO InitialLevel
+        <*> newTVarIO []
         <*> newTVarIO []
         <*> newTVarIO []
         <*> newIORef isecs
@@ -233,11 +224,11 @@ newConnection rl ver myCID peerCID debugLog qLog close sref isecs =
         <*> return 256
         <*> mallocBytes 1280
         <*> return 1280
-        <*> newIORef Nothing
   where
+    isclient = rl == Client
     initialRoleInfo
-      | rl == Client = defaultClientRoleInfo
-      | otherwise    = defaultServerRoleInfo
+      | isclient  = defaultClientRoleInfo
+      | otherwise = defaultServerRoleInfo
 
 defaultTrafficSecrets :: (ClientTrafficSecret a, ServerTrafficSecret a)
 defaultTrafficSecrets = (ClientTrafficSecret "", ServerTrafficSecret "")

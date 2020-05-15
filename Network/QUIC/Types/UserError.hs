@@ -10,6 +10,8 @@ data QUICError = VersionIsUnknown Word32
                | TransportErrorOccurs TransportError ReasonPhrase
                | ApplicationErrorOccurs ApplicationError ReasonPhrase
                | ConnectionIsClosed
+               | ConnectionIsTimeout
+               | ConnectionIsReset
                | StreamIsClosed
                | HandshakeFailed String
                | NoVersionIsSpecified
@@ -21,6 +23,7 @@ instance E.Exception QUICError
 
 data InternalControl = NextVersion Version
                      | MustNotReached
+                     | Break
                      deriving (Eq, Show)
 
 instance E.Exception InternalControl

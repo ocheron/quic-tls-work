@@ -1,13 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Network.QUIC.Connection.Role (
-    getClientController
-  , setClientController
-  , clearClientController
-  , getServerController
-  , setServerController
-  , clearServerController
-  , setToken
+    setToken
   , getToken
   , getResumptionInfo
   , setRetried
@@ -21,41 +15,18 @@ module Network.QUIC.Connection.Role (
   , getTokenManager
   , setMainThreadId
   , getMainThreadId
+  , setCertificateChain
+  , getCertificateChain
   ) where
 
 import Control.Concurrent
 import qualified Crypto.Token as CT
 import Data.IORef
-import Network.TLS.QUIC
+import Data.X509 (CertificateChain)
 
 import Network.QUIC.Connection.Types
 import Network.QUIC.TLS
 import Network.QUIC.Types
-
-----------------------------------------------------------------
-
-setClientController :: Connection -> ClientController -> IO ()
-setClientController Connection{..} ctl = modifyIORef' roleInfo $ \ci ->
-  ci { connClientCntrl = ctl }
-
-getClientController :: Connection -> IO ClientController
-getClientController Connection{..} = connClientCntrl <$> readIORef roleInfo
-
-clearClientController :: Connection -> IO ()
-clearClientController conn = setClientController conn nullClientController
-
-
-----------------------------------------------------------------
-
-setServerController :: Connection -> ServerController -> IO ()
-setServerController Connection{..} ctl = modifyIORef' roleInfo $ \ci ->
-  ci {connServerCntrl = ctl }
-
-getServerController :: Connection -> IO ServerController
-getServerController Connection{..} = connServerCntrl <$> readIORef roleInfo
-
-clearServerController :: Connection -> IO ()
-clearServerController conn = setServerController conn nullServerController
 
 ----------------------------------------------------------------
 
@@ -132,3 +103,13 @@ setMainThreadId Connection{..} tid = modifyIORef' roleInfo $ \si -> si {
 
 getMainThreadId :: Connection -> IO ThreadId
 getMainThreadId Connection{..} = mainThreadId <$> readIORef roleInfo
+
+----------------------------------------------------------------
+
+setCertificateChain :: Connection -> Maybe CertificateChain -> IO ()
+setCertificateChain Connection{..} mcc = modifyIORef' roleInfo $ \si -> si {
+    certChain = mcc
+  }
+
+getCertificateChain :: Connection -> IO (Maybe CertificateChain)
+getCertificateChain Connection{..} = certChain <$> readIORef roleInfo

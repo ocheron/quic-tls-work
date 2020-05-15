@@ -8,8 +8,9 @@ module Network.QUIC.Connection.Misc (
   , clearThreads
   , getSockInfo
   , setSockInfo
-  , getNextVersion
-  , setNextVersion
+  , killHandshaker
+  , setKillHandshaker
+  , clearKillHandshaker
   ) where
 
 import Control.Concurrent
@@ -18,6 +19,7 @@ import Network.Socket
 import System.Mem.Weak
 
 import Network.QUIC.Connection.Types
+import Network.QUIC.Imports
 import Network.QUIC.Types
 
 ----------------------------------------------------------------
@@ -62,8 +64,20 @@ setSockInfo Connection{..} si = writeIORef sockInfo si
 
 ----------------------------------------------------------------
 
-getNextVersion :: Connection -> IO (Maybe Version)
-getNextVersion Connection{..} = readIORef nextVersion
+killHandshaker :: Connection -> IO ()
+killHandshaker Connection{..} = do
+    join $ readIORef killHandshakerAct
+    writeIORef killHandshakerAct $ return ()
 
-setNextVersion :: Connection -> Version -> IO ()
-setNextVersion Connection{..} ver = writeIORef nextVersion $ Just ver
+clearKillHandshaker :: Connection -> IO ()
+clearKillHandshaker Connection{..} =
+    writeIORef killHandshakerAct $ return ()
+
+setKillHandshaker :: Connection -> ThreadId -> IO ()
+setKillHandshaker Connection{..} tid = do
+    wtid <- mkWeakThreadId tid
+    writeIORef killHandshakerAct $ do
+        mtid <- deRefWeak wtid
+        case mtid of
+          Nothing  -> return ()
+          Just tid' -> killThread tid'
