@@ -11,11 +11,11 @@ Experiments and WIP based on projects:
 - Handshake mode and negotiated protocol are now taken from the TLS context and
   removed from `ApplicationSecretInfo`.
 
+- Parameter `sharedExtensions` is renamed `sharedHelloExtensions` and added to
+  `ServerHello` message before TLS 1.3.
+
 ## To do
 
 - We could add a new `TLSError` constructor taking `SomeException` to hold a
   `QUICError` (or any other type the record layer wishes).  This would restore
   the possibility for QUIC to throw negotation failures from `quicRecv`.
-
-- More generic interface to insert/extract some content in TLS extensions.
-  Could be applicable to TLS < 1.3 as well.  And to all message types.
