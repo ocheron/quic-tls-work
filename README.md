@@ -14,6 +14,9 @@ Experiments and WIP based on projects:
 - Parameter `sharedExtensions` is renamed `sharedHelloExtensions` and added to
   `ServerHello` message before TLS 1.3.
 
+- Alert protocol between client and server is restored so that a failure during
+  TLS handshake interrupts the connection attempt on both sides.
+
 ## To do
 
 - We could add a new `TLSError` constructor taking `SomeException` to hold a
