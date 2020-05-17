@@ -9,7 +9,9 @@ Experiments and WIP based on projects:
 ## Changes done
 
 - Handshake mode and negotiated protocol are now taken from the TLS context and
-  removed from `ApplicationSecretInfo`.
+  removed from `ApplicationSecretInfo`.  When 0-RTT is not possible, handshake
+  mode is `RTT0` but no early traffic secret is set.  QUIC should use this as
+  signal that 0-RTT has not been accepted and that early data should be skipped.
 
 - Parameter `sharedExtensions` is renamed `sharedHelloExtensions` and added to
   `ServerHello` message before TLS 1.3.
