@@ -18,9 +18,3 @@ Experiments and WIP based on projects:
 
 - Alert protocol between client and server is restored so that a failure during
   TLS handshake interrupts the connection attempt on both sides.
-
-## To do
-
-- We could add a new `TLSError` constructor taking `SomeException` to hold a
-  `QUICError` (or any other type the record layer wishes).  This would restore
-  the possibility for QUIC to throw negotation failures from `quicRecv`.
