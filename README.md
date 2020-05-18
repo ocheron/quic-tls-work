@@ -18,3 +18,6 @@ Experiments and WIP based on projects:
 
 - Alert protocol between client and server is restored so that a failure during
   TLS handshake interrupts the connection attempt on both sides.
+
+- `SendClientHello` is not emitted a second time after HelloRetryRequest so that
+  early traffic secret is set just once.
